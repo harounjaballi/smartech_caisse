@@ -1,0 +1,502 @@
+import React, { useState, useEffect } from 'react';
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, orderBy } from 'firebase/firestore';
+import { db } from '../firebase';
+import { Client, StoreSettings } from '../types';
+import { handleFirestoreError, OperationType } from '../App';
+import { Plus, Search, Edit2, Trash2, X, Phone, MapPin, Wallet, Coins, AlertCircle, CheckCircle } from 'lucide-react';
+import { cn } from '../lib/utils';
+
+export default function Clients() {
+  const [clients, setClients] = useState<Client[]>([]);
+  const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [onlyWithDebt, setOnlyWithDebt] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingClient, setEditingClient] = useState<Client | null>(null);
+
+  // Settlement state
+  const [isSettleModalOpen, setIsSettleModalOpen] = useState(false);
+  const [settlingClient, setSettlingClient] = useState<Client | null>(null);
+  const [settleAmountInput, setSettleAmountInput] = useState('');
+  const [settleAmount, setSettleAmount] = useState<number>(0);
+
+  // Form state
+  const [formData, setFormData] = useState({
+    name: '',
+    code: '',
+    phone: '',
+    address: '',
+    debt: 0
+  });
+
+  const [debtInput, setDebtInput] = useState('');
+
+  useEffect(() => {
+    const q = query(collection(db, 'clients'), orderBy('name'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const cls = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client));
+      setClients(cls);
+      setLoading(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'clients');
+    });
+
+    const unsubscribeSettings = onSnapshot(doc(db, 'settings', 'store'), (snapshot) => {
+      if (snapshot.exists()) {
+        setStoreSettings(snapshot.data() as StoreSettings);
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'settings');
+    });
+
+    return () => {
+      unsubscribe();
+      unsubscribeSettings();
+    };
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      if (editingClient) {
+        await updateDoc(doc(db, 'clients', editingClient.id), formData);
+      } else {
+        await addDoc(collection(db, 'clients'), formData);
+      }
+      closeModal();
+    } catch (error) {
+      handleFirestoreError(error, editingClient ? OperationType.UPDATE : OperationType.CREATE, 'clients');
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Êtes-vous sûr de vouloir supprimer ce client ?')) return;
+    try {
+      await deleteDoc(doc(db, 'clients', id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'clients');
+    }
+  };
+
+  const openModal = (client?: Client) => {
+    if (client) {
+      setEditingClient(client);
+      setFormData({
+        name: client.name,
+        code: client.code || '',
+        phone: client.phone || '',
+        address: client.address || '',
+        debt: client.debt
+      });
+      setDebtInput(client.debt.toString());
+    } else {
+      setEditingClient(null);
+      setFormData({
+        name: '',
+        code: '',
+        phone: '',
+        address: '',
+        debt: 0
+      });
+      setDebtInput('');
+    }
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setEditingClient(null);
+  };
+
+  const openSettleModal = (client: Client) => {
+    setSettlingClient(client);
+    setSettleAmountInput('');
+    setSettleAmount(0);
+    setIsSettleModalOpen(true);
+  };
+
+  const closeSettleModal = () => {
+    setIsSettleModalOpen(false);
+    setSettlingClient(null);
+  };
+
+  const handleSettleSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!settlingClient) return;
+    try {
+      const newDebt = Math.max(0, settlingClient.debt - settleAmount);
+      await updateDoc(doc(db, 'clients', settlingClient.id), {
+        debt: newDebt
+      });
+      closeSettleModal();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'clients');
+    }
+  };
+
+  const filteredClients = clients.filter(c => {
+    const matchesSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      c.code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      c.phone?.includes(searchTerm);
+    
+    if (onlyWithDebt) {
+      return matchesSearch && c.debt > 0;
+    }
+    return matchesSearch;
+  });
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">Clients</h1>
+          <p className="text-xs text-slate-400 font-medium uppercase tracking-wider mt-0.5">Gérez vos clients et leurs dettes</p>
+        </div>
+        <button
+          onClick={() => openModal()}
+          className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all duration-300 shadow-lg shadow-indigo-600/15 group hover:-translate-y-0.5"
+        >
+          <Plus className="w-4 h-4 transition-transform group-hover:rotate-90 duration-300" />
+          Nouveau Client
+        </button>
+      </div>
+
+      <div className="bg-white rounded-3xl border border-slate-100 shadow-xs overflow-hidden premium-shadow">
+        <div className="p-5 border-b border-slate-100 bg-slate-50/20 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Rechercher un client..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border border-slate-100 rounded-xl focus:bg-white text-xs font-semibold text-slate-700 placeholder-slate-400 focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all duration-300"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setOnlyWithDebt(!onlyWithDebt)}
+              className={cn(
+                "flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all duration-200 border cursor-pointer select-none",
+                onlyWithDebt 
+                  ? "bg-rose-50 text-rose-700 border-rose-200 shadow-xs" 
+                  : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-800"
+              )}
+            >
+              <Coins className={cn("w-4 h-4 transition-transform duration-300", onlyWithDebt ? "text-rose-500 scale-110" : "text-slate-400")} />
+              <span>Clients endettés uniquement</span>
+              {onlyWithDebt && (
+                <span className="ml-1.5 px-2 py-0.5 bg-rose-200 text-rose-800 text-xs font-black rounded-md">
+                  {clients.filter(c => c.debt > 0).length}
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto text-[13px] font-medium text-slate-600">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50/50 border-b border-slate-100 text-slate-400 text-[10px] font-extrabold uppercase tracking-widest">
+                <th className="px-6 py-4">Client</th>
+                <th className="px-6 py-4">Contact</th>
+                <th className="px-6 py-4">Dette Actuelle</th>
+                <th className="px-6 py-4 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100/70">
+              {loading ? (
+                <tr>
+                  <td colSpan={4} className="px-6 py-10 text-center text-gray-500">Chargement...</td>
+                </tr>
+              ) : filteredClients.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-6 py-10 text-center text-gray-500">Aucun client trouvé.</td>
+                </tr>
+              ) : (
+                filteredClients.map((client) => (
+                  <tr key={client.id} className="hover:bg-gray-50/50 transition-colors">
+                    <td className="px-6 py-4">
+                      <div className="font-medium text-gray-900">{client.name}</div>
+                      {client.code && <div className="text-[10px] text-gray-400 font-mono uppercase tracking-tighter">Code: {client.code}</div>}
+                      {client.address && (
+                        <div className="text-xs text-gray-500 flex items-center gap-1 mt-1">
+                          <MapPin className="w-3 h-3" />
+                          {client.address}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
+                      {client.phone ? (
+                        <div className="text-sm text-gray-600 flex items-center gap-1">
+                          <Phone className="w-3 h-3" />
+                          {client.phone}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-400 italic">Non renseigné</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className={cn(
+                        "inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-base font-black font-mono border",
+                        client.debt > 0 ? "bg-red-50 text-red-700 border-red-100" : "bg-emerald-50 text-emerald-700 border-emerald-100"
+                      )}>
+                        <Wallet className="w-4 h-4 shrink-0" />
+                        {client.debt.toFixed(2)} {storeSettings?.currency || 'DT'}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        {client.debt > 0 && (
+                          <button
+                            onClick={() => openSettleModal(client)}
+                            className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                            title="Régler la dette"
+                          >
+                            <Coins className="w-4 h-4" />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => openModal(client)}
+                          className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(client.id)}
+                          className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Modal */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-gray-100">
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+              <h2 className="text-lg font-bold text-gray-900">
+                {editingClient ? 'Modifier Client' : 'Nouveau Client'}
+              </h2>
+              <button onClick={closeModal} className="p-2 text-gray-400 hover:text-gray-650 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Nom complet</label>
+                  <input
+                    type="text"
+                    required
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                    placeholder="Ahmed Ben Salah"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Code Client</label>
+                  <input
+                    type="text"
+                    value={formData.code}
+                    onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                    placeholder="CLI-001"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Téléphone</label>
+                <input
+                  type="tel"
+                  value={formData.phone}
+                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                  placeholder="Ex: 21 000 000"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Adresse</label>
+                <input
+                  type="text"
+                  value={formData.address}
+                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                  placeholder="Ex: Rue de la Liberté, Tunis"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Dette Initiale ({storeSettings?.currency || 'DT'})</label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={debtInput}
+                  onChange={(e) => {
+                    const value = e.target.value.replace(',', '.');
+                    if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                      setDebtInput(value);
+                      setFormData({ ...formData, debt: parseFloat(value) || 0 });
+                    }
+                  }}
+                  onBlur={() => {
+                    const parsed = parseFloat(debtInput) || 0;
+                    setDebtInput(parsed.toString());
+                    setFormData({ ...formData, debt: parsed });
+                  }}
+                  placeholder="0.00"
+                  className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                />
+              </div>
+
+              <div className="pt-4 flex gap-3">
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="flex-1 px-4 py-2.5 bg-gray-100 text-gray-700 font-semibold rounded-xl hover:bg-gray-200 transition-colors"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 px-4 py-2.5 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-600/15"
+                >
+                  {editingClient ? 'Enregistrer' : 'Ajouter'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {isSettleModalOpen && settlingClient && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-gray-100">
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-emerald-50/50">
+              <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                <Coins className="w-5 h-5 text-emerald-600" />
+                Règlement de Dette
+              </h2>
+              <button onClick={closeSettleModal} className="p-2 text-gray-400 hover:text-gray-650 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSettleSubmit} className="p-6 space-y-4">
+              <div className="bg-slate-50 p-4 rounded-xl space-y-2 border border-slate-100/50">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-slate-400 font-bold uppercase tracking-wider">Client</span>
+                  <span className="font-bold text-slate-800">{settlingClient.name}</span>
+                </div>
+                {settlingClient.code && (
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-slate-400 font-bold uppercase tracking-wider">Code</span>
+                    <span className="font-mono text-slate-600">{settlingClient.code}</span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center border-t border-slate-200/60 pt-2 text-sm">
+                  <span className="text-rose-600 font-black uppercase tracking-wider">Dette Totale</span>
+                  <span className="font-black text-rose-600 font-mono text-xl">
+                    {settlingClient.debt.toFixed(2)} {storeSettings?.currency || 'DT'}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
+                  Montant Payé ({storeSettings?.currency || 'DT'})
+                </label>
+                <div className="relative">
+                  <Coins className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500" />
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    required
+                    value={settleAmountInput}
+                    onChange={(e) => {
+                      const value = e.target.value.replace(',', '.');
+                      if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                        setSettleAmountInput(value);
+                        setSettleAmount(parseFloat(value) || 0);
+                      }
+                    }}
+                    placeholder="0.00"
+                    className="w-full pl-9 pr-24 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-emerald-500/10 focus:border-emerald-500 shadow-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSettleAmountInput(settlingClient.debt.toString());
+                      setSettleAmount(settlingClient.debt);
+                    }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10px] font-black uppercase tracking-wider rounded-lg border border-emerald-100 transition-colors"
+                  >
+                    Tout solder
+                  </button>
+                </div>
+              </div>
+
+              {settleAmount > 0 && settleAmount < settlingClient.debt ? (
+                <div className="p-4 bg-amber-50/50 rounded-xl border border-amber-100/70 space-y-3 animate-in fade-in duration-200">
+                  <div className="flex items-center gap-1.5 text-amber-700 font-bold">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span className="text-[10px] font-black uppercase tracking-wider">Montant inférieur à la dette globale</span>
+                  </div>
+                  <p className="text-xs text-amber-700 leading-normal">
+                    Le montant payé est inférieur au total de la dette. La dette restante après ce règlement sera de :
+                  </p>
+                  <div className="flex justify-between items-center text-base font-black text-amber-950 font-mono bg-amber-100/40 p-2.5 rounded-xl border border-amber-250/30">
+                    <span>Reste de la dette:</span>
+                    <span>{(settlingClient.debt - settleAmount).toFixed(2)} {storeSettings?.currency || 'DT'}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSettleSubmit}
+                    className="w-full py-2.5 px-4 bg-amber-600 hover:bg-amber-700 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all shadow-md shadow-amber-600/10"
+                  >
+                    Enregistrer le reste de la dette
+                  </button>
+                </div>
+              ) : settleAmount >= settlingClient.debt ? (
+                <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-100 flex items-center gap-2 text-emerald-700 animate-in fade-in duration-200">
+                  <CheckCircle className="w-4 h-4 shrink-0" />
+                  <span className="text-xs font-semibold leading-normal">La dette de ce client sera entièrement soldée.</span>
+                </div>
+              ) : null}
+
+              <div className="pt-2 flex gap-3">
+                <button
+                  type="button"
+                  onClick={closeSettleModal}
+                  className="flex-1 px-4 py-2.5 bg-gray-100 text-gray-700 text-xs font-bold rounded-xl hover:bg-gray-200 transition-colors uppercase tracking-wider"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={settleAmount <= 0}
+                  className="flex-1 px-4 py-2.5 bg-indigo-600 text-white text-xs font-bold rounded-xl hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-lg shadow-indigo-600/15 uppercase tracking-wider"
+                >
+                  Valider
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

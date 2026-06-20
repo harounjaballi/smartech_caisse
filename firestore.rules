@@ -1,0 +1,128 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Hardcoded admin check (UID and Email)
+    function isHardcodedAdmin() {
+      return isAuthenticated() && (
+        request.auth.uid == "sufsYk0L6QM9bI45kZknZdlzEtJ2" ||
+        request.auth.token.get('email', '') == "harounjaballi@gmail.com"
+      );
+    }
+
+    // Check if user is an admin (either hardcoded or via Firestore role)
+    function isAdmin() {
+      return isHardcodedAdmin() || (
+        isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'user') == 'admin'
+      );
+    }
+
+    // Check if user is NOT banned
+    function isNotBanned() {
+      return isHardcodedAdmin() || (
+        isAuthenticated() && 
+        (!exists(/databases/$(database)/documents/users/$(request.auth.uid)) || 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('status', 'active') != 'banned')
+      );
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidProduct(data) {
+      return data.name is string && data.name.size() > 0 &&
+             data.category is string && data.category.size() > 0 &&
+             data.buyPrice is number && data.buyPrice >= 0 &&
+             data.sellPrice is number && data.sellPrice >= 0 &&
+             data.stock is number;
+    }
+
+    function isValidClient(data) {
+      return data.name is string && data.name.size() > 0 &&
+             data.debt is number;
+    }
+
+    function isValidSale(data) {
+      return data.date is timestamp &&
+             data.total is number && data.total >= 0 &&
+             data.paid is number && data.paid >= 0 &&
+             data.items is list;
+    }
+
+    function isValidNote(data) {
+      return data.title is string && data.title.size() > 0 &&
+             data.content is string &&
+             data.date is string && data.date.size() > 0 &&
+             data.userId is string;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      // Allow users to read/write their own profile
+      // Allow hardcoded admin to read/write any profile
+      // Allow other admins to read/write any profile (using manual check to avoid recursion)
+      allow read, write: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        isHardcodedAdmin() || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+      );
+    }
+
+    match /products/{productId} {
+      allow read: if isAuthenticated() && isNotBanned();
+      allow write: if isAdmin();
+    }
+
+    match /clients/{clientId} {
+      allow read: if isAuthenticated() && isNotBanned();
+      allow create, update: if isAuthenticated() && isNotBanned() && isValidClient(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /sales/{saleId} {
+      allow read: if isAuthenticated() && isNotBanned();
+      allow create: if isAuthenticated() && isNotBanned() && isValidSale(request.resource.data);
+      allow update, delete: if isAdmin();
+    }
+
+    match /invoices/{invoiceId} {
+      allow read: if isAuthenticated() && isNotBanned();
+      allow create: if isAuthenticated() && isNotBanned();
+      allow update, delete: if isAdmin();
+    }
+
+    match /counters/{counterId} {
+      allow read, write: if isAuthenticated() && isNotBanned();
+    }
+
+    match /categories/{categoryId} {
+      allow read, write: if isAuthenticated() && isNotBanned();
+    }
+
+    match /settings/{settingId} {
+      allow read: if isAuthenticated() && isNotBanned();
+      allow write: if isAdmin();
+    }
+
+    match /notes/{noteId} {
+      allow read: if isAuthenticated() && isNotBanned();
+      allow create, update: if isAuthenticated() && isNotBanned() && isValidNote(request.resource.data);
+      allow delete: if isAuthenticated() && isNotBanned();
+    }
+  }
+}
