@@ -22,7 +22,7 @@ const adminDb = getFirestore(adminApp, firebaseConfig.firestoreDatabaseId);
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT || 3000; // DigitalOcean App Platform injects PORT (typically 8080)
 
   app.use(cors());
   app.use(bodyParser.json());
