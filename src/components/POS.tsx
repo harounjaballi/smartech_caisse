@@ -136,29 +136,37 @@ export default function POS() {
     if (!scannerActive) return;
 
     let buffer = '';
-    let lastKeyTime = Date.now();
+    let lastKeyTime = 0;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.altKey || e.metaKey) return;
+      if (e.key === 'Tab' || e.key === 'Escape' || e.key === 'ArrowUp' || e.key === 'ArrowDown') return;
 
       const now = Date.now();
       const target = e.target as HTMLElement;
       const isInputFocused = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
       
-      const interval = now - lastKeyTime;
+      // If user is actively typing in an input, let the browser handle keyboard events natively to prevent conflicts
+      if (isInputFocused) {
+        return;
+      }
+
+      const interval = lastKeyTime ? now - lastKeyTime : 0;
       lastKeyTime = now;
 
       if (e.key.length === 1) {
-        // If focused in an input AND typing is slow (human typing), reset buffer and let normal key pass
-        if (isInputFocused && interval > 60) {
+        // Physical barcode scanners transmit keyboard events at high speed (usually < 50ms)
+        // If the interval is high (> 120ms), it's either the very first character of a scan or human keystrokes.
+        // We set it as the new first character of our buffer.
+        if (interval > 120) {
           buffer = e.key;
-          return;
+        } else {
+          buffer += e.key;
         }
-        // Accumulate laser scanner char
-        buffer += e.key;
       } else if (e.key === 'Enter') {
         const barcode = buffer.trim();
         buffer = ''; // reset buffer
+        lastKeyTime = 0;
 
         if (barcode.length >= 3) {
           // Find matching product
@@ -181,16 +189,13 @@ export default function POS() {
             e.preventDefault();
             e.stopPropagation();
           } else {
-            // Only alert if we scanned rapidly or were not focused on an input to avoid intercepting normal submits
-            if (!isInputFocused || interval <= 60) {
-              setScanNotification({
-                message: `Code non reconnu : ${barcode}`,
-                type: 'error'
-              });
-              playBeep('error');
-              e.preventDefault();
-              e.stopPropagation();
-            }
+            setScanNotification({
+              message: `Code non reconnu : ${barcode}`,
+              type: 'error'
+            });
+            playBeep('error');
+            e.preventDefault();
+            e.stopPropagation();
           }
         }
       }
@@ -465,28 +470,82 @@ export default function POS() {
       {/* Left: Product Selection */}
       <div className="lg:col-span-5 flex flex-col gap-4 min-h-0">
         <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm space-y-4">
-          <div className="flex items-center justify-between px-3.5 py-2.5 bg-indigo-50/30 border border-indigo-100/50 rounded-xl relative group">
-            <div className="flex items-center gap-2.5">
-              <div className="relative flex items-center justify-center">
-                <Barcode className={cn("w-5 h-5 text-indigo-600", scannerActive && "animate-pulse")} />
-                {scannerActive && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-500 rounded-full animate-ping" />}
+          <div className="flex flex-col gap-2.5 bg-slate-50 border border-slate-100 p-3.5 rounded-2xl relative">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="relative flex items-center justify-center">
+                  <Barcode className={cn("w-5 h-5 text-indigo-600", scannerActive && "animate-pulse")} />
+                  {scannerActive && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-500 rounded-full animate-ping" />}
+                </div>
+                <div className="flex flex-col leading-tight">
+                  <span className="text-xs font-black text-slate-800 uppercase tracking-wider">Douchette Laser</span>
+                  <span className="text-[10px] text-slate-500 font-bold font-sans">Ecoute automatique ou saisie directe</span>
+                </div>
               </div>
-              <div className="flex flex-col leading-tight">
-                <span className="text-xs font-black text-indigo-950">Douchette Laser</span>
-                <span className="text-[10px] text-indigo-600/75 font-bold font-sans">Prêt à scanner partout !</span>
-              </div>
+              <button
+                onClick={() => setScannerActive(!scannerActive)}
+                className={cn(
+                  "px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all border cursor-pointer",
+                  scannerActive
+                    ? "bg-emerald-500 text-white border-emerald-500 shadow-md shadow-emerald-500/10"
+                    : "bg-slate-200 text-slate-600 border-slate-300"
+                )}
+              >
+                {scannerActive ? "Actif" : "Inactif"}
+              </button>
             </div>
-            <button
-              onClick={() => setScannerActive(!scannerActive)}
-              className={cn(
-                "px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all border",
-                scannerActive
-                  ? "bg-emerald-500 text-white border-emerald-500 shadow-lg shadow-emerald-500/10"
-                  : "bg-slate-100 text-slate-500 border-slate-200"
-              )}
-            >
-              {scannerActive ? "Actif" : "Inactif"}
-            </button>
+
+            {scannerActive && (
+              <div className="mt-2 text-left bg-emerald-50/50 border border-emerald-100 p-2.5 rounded-xl flex flex-col gap-2 animate-in fade-in duration-300">
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Barcode className="h-4 w-4 text-emerald-600 animate-pulse animate-duration-1000" />
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Saisie manuelle ou scan douchette direct ici..."
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const code = e.currentTarget.value.trim();
+                        if (code !== '') {
+                          const matchedProduct = products.find(p => p.barcode === code);
+                          if (matchedProduct) {
+                            if (matchedProduct.stock <= 0) {
+                              setScanNotification({
+                                message: `Rupture de Stock : ${matchedProduct.name}`,
+                                type: 'error'
+                              });
+                              playBeep('error');
+                            } else {
+                              addToCart(matchedProduct);
+                              setScanNotification({
+                                message: `Flashé ! ${matchedProduct.name}`,
+                                type: 'success'
+                              });
+                              playBeep('success');
+                            }
+                          } else {
+                            setScanNotification({
+                              message: `Code article inconnu : ${code}`,
+                              type: 'error'
+                            });
+                            playBeep('error');
+                          }
+                          e.currentTarget.value = '';
+                        }
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }
+                    }}
+                    className="block w-full pl-9 pr-3 py-1.5 bg-white border border-emerald-200 rounded-lg text-xs font-mono font-bold tracking-wider placeholder:text-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-emerald-950 transition-all shadow-3xs"
+                  />
+                </div>
+                <div className="flex items-center gap-1.5 text-[9px] font-semibold text-emerald-700/80">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  <span>Ciblez ce champ ou scannez n'importe où sur l'écran ! Supports multi-générations.</span>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="relative">

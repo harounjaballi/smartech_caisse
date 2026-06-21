@@ -3,7 +3,7 @@ import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, order
 import { db } from '../firebase';
 import { Product, Category, StoreSettings } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
-import { Plus, Search, Edit2, Trash2, X, AlertTriangle, Package, Tag } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, X, AlertTriangle, Package, Tag, Barcode } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export default function Products() {
@@ -16,6 +16,103 @@ export default function Products() {
   const [isQuickCategoryModalOpen, setIsQuickCategoryModalOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [scanStatus, setScanStatus] = useState<'idle' | 'scanned' | 'error'>('idle');
+  const [scanMessage, setScanMessage] = useState('');
+
+  const playBeep = (type: 'success' | 'error') => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      if (type === 'success') {
+        const oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        oscillator.type = 'sine';
+        oscillator.frequency.value = 950;
+        gainNode.gain.setValueAtTime(0.08, audioCtx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.12);
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        oscillator.start();
+        oscillator.stop(audioCtx.currentTime + 0.12);
+      } else {
+        [0, 120].forEach((delay) => {
+          setTimeout(() => {
+            try {
+              const osc = audioCtx.createOscillator();
+              const gain = audioCtx.createGain();
+              osc.type = 'sawtooth';
+              osc.frequency.value = 180;
+              gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+              gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+              osc.connect(gain);
+              gain.connect(audioCtx.destination);
+              osc.start();
+              osc.stop(audioCtx.currentTime + 0.15);
+            } catch (innerErr) {}
+          }, delay);
+        });
+      }
+    } catch (err) {}
+  };
+
+  useEffect(() => {
+    if (!isModalOpen) {
+      setScanStatus('idle');
+      setScanMessage('');
+      return;
+    }
+
+    let buffer = '';
+    let lastKeyTime = 0;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
+      if (e.key === 'Tab' || e.key === 'Escape' || e.key === 'ArrowUp' || e.key === 'ArrowDown') return;
+
+      const now = Date.now();
+      const target = e.target as HTMLElement;
+      const isInputFocused = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT');
+      const isBarcodeInputFocused = target && target.tagName === 'INPUT' && (target as HTMLInputElement).placeholder?.includes('douchette');
+
+      const interval = lastKeyTime ? now - lastKeyTime : 0;
+      lastKeyTime = now;
+
+      if (e.key.length === 1) {
+        if (isInputFocused && !isBarcodeInputFocused && interval > 120) {
+          buffer = e.key;
+          return;
+        }
+
+        if (interval > 120) {
+          buffer = e.key;
+        } else {
+          buffer += e.key;
+        }
+      } else if (e.key === 'Enter') {
+        const barcode = buffer.trim();
+        buffer = '';
+        lastKeyTime = 0;
+
+        if (barcode.length >= 3) {
+          playBeep('success');
+          setFormData(prev => ({ ...prev, barcode }));
+          setScanStatus('scanned');
+          setScanMessage(`Code détecté avec succès : ${barcode}`);
+          setTimeout(() => {
+            setScanStatus('idle');
+            setScanMessage('');
+          }, 4500);
+
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [isModalOpen]);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -294,15 +391,54 @@ export default function Products() {
                   />
                 </div>
 
-                <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Code à barre / Référence</label>
-                  <input
-                    type="text"
-                    placeholder="Scannez ou saisissez le code..."
-                    value={formData.barcode}
-                    onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none font-mono"
-                  />
+                <div className="col-span-2 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-black uppercase tracking-wider text-slate-700">
+                      Code à barre / Référence
+                    </label>
+                    <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-100">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      Scanner Douchette Prêt
+                    </span>
+                  </div>
+                  
+                  <div className="relative group">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                      <Barcode className="h-4.5 w-4.5 text-indigo-500 group-focus-within:text-indigo-600" />
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Pointez votre douchette et flashez, ou tapez ici..."
+                      value={formData.barcode}
+                      onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
+                      className="w-full pl-11 pr-24 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white text-xs font-bold font-mono text-slate-800 placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all duration-300"
+                    />
+                    <div className="absolute inset-y-1.5 right-1.5 flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const randomCode = '619' + Math.floor(1000000000 + Math.random() * 9000000000).toString();
+                          setFormData({ ...formData, barcode: randomCode });
+                          playBeep('success');
+                        }}
+                        className="h-full px-2.5 bg-slate-100 hover:bg-slate-200 text-[10px] font-black uppercase tracking-wider text-slate-600 rounded-lg transition-colors border border-slate-200 cursor-pointer"
+                        title="Générer un code-barres aléatoire commençant par 619 Tunisie"
+                      >
+                        Générer
+                      </button>
+                    </div>
+                  </div>
+
+                  {scanStatus === 'scanned' && (
+                    <div className="text-[11px] font-black text-emerald-600 bg-emerald-50/80 px-3 py-1.5 rounded-xl border border-emerald-100 flex items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-300">
+                      <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                      <span>{scanMessage}</span>
+                    </div>
+                  )}
+                  
+                  <p className="text-[10px] text-slate-500 font-sans leading-relaxed">
+                    Vous pouvez scanner directement le produit à tout moment pendant que ce formulaire est ouvert. La douchette remplira automatiquement ce champ et émettra un signal sonore.
+                  </p>
                 </div>
 
                 <div>
