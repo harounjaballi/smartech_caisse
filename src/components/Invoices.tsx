@@ -49,7 +49,7 @@ export default function Invoices() {
 
   useEffect(() => {
     if (!isPaidFocused) {
-      setPaidAmountInput(paidAmount === 0 ? '' : paidAmount.toString());
+      setPaidAmountInput(paidAmount === 0 ? '' : paidAmount.toFixed(3));
     }
   }, [paidAmount, isPaidFocused]);
 
@@ -137,16 +137,19 @@ export default function Invoices() {
     setCart(prev => prev.filter(item => item.productId !== productId));
   };
 
-  const subtotal = useMemo(() => cart.reduce((sum, item) => sum + item.total, 0), [cart]);
+  const subtotal = useMemo(() => {
+    const rawSum = cart.reduce((sum, item) => sum + item.total, 0);
+    return Math.round(rawSum * 1000) / 1000;
+  }, [cart]);
   const tvaRate = storeSettings?.tvaEnabled !== false ? (storeSettings?.tva || 19) / 100 : 0;
-  const tvaAmount = subtotal * tvaRate;
-  const cartTotal = subtotal + tvaAmount;
+  const tvaAmount = Math.round(subtotal * tvaRate * 1000) / 1000;
+  const cartTotal = Math.round((subtotal + tvaAmount) * 1000) / 1000;
 
   useEffect(() => {
     setPaidAmount(cartTotal);
-  }, [cartTotal]);
+  }, [selectedClient, cartTotal]);
 
-  const remainingDebt = Math.max(0, cartTotal - paidAmount);
+  const remainingDebt = Math.round(Math.max(0, cartTotal - paidAmount) * 1000) / 1000;
 
   const filteredProducts = useMemo(() => 
     products.filter(p => 
@@ -160,6 +163,21 @@ export default function Invoices() {
     setIsProcessing(true);
     setError(null);
     console.log('Starting invoice validation...', { cart, selectedClient, paidAmount });
+
+    // Règle de paiement selon le type de client
+    if (!selectedClient) {
+      if (Math.abs(paidAmount - cartTotal) > 0.001) {
+        setError(`Pour un client passagé, le montant payé doit être obligatoirement égal au montant total de la vente (${cartTotal.toFixed(3)} ${storeSettings?.currency || 'DT'}).`);
+        setIsProcessing(false);
+        return;
+      }
+    } else {
+      if (paidAmount > cartTotal + 0.001) {
+        setError(`Le montant payé ne peut pas dépasser le montant total de la vente (${cartTotal.toFixed(3)} ${storeSettings?.currency || 'DT'}).`);
+        setIsProcessing(false);
+        return;
+      }
+    }
 
     try {
       await runTransaction(db, async (transaction) => {
@@ -380,7 +398,7 @@ export default function Invoices() {
                       <div className="text-sm font-medium text-gray-900">{invoice.clientName}</div>
                       {invoice.clientCode && <div className="text-[10px] text-gray-400 font-mono uppercase tracking-tighter">Code: {invoice.clientCode}</div>}
                     </td>
-                    <td className="px-6 py-4 font-black text-gray-900 font-mono">{invoice.total.toFixed(2)} {storeSettings?.currency || 'DT'}</td>
+                    <td className="px-6 py-4 font-black text-gray-900 font-mono">{invoice.total.toFixed(3)} {storeSettings?.currency || 'DT'}</td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button
@@ -407,59 +425,77 @@ export default function Invoices() {
 
       {/* New Invoice Modal */}
       {isNewInvoiceModalOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-5xl overflow-hidden border border-green-800 flex flex-col h-[90vh]">
-            <div className="px-8 py-6 border-b border-green-800 flex items-center justify-between bg-gray-50/50">
-              <div className="flex items-center gap-3">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-2 sm:p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-5xl overflow-hidden border border-green-850 flex flex-col h-[92vh] sm:h-[90vh]">
+            <div className="px-5 py-4 sm:px-8 sm:py-6 border-b border-green-800 flex items-center justify-between bg-gray-50/50">
+              <div className="flex items-center gap-2.5">
                 <div className="p-2 bg-green-100 text-green-700 rounded-xl">
-                  <Plus className="w-6 h-6" />
+                  <Plus className="w-4.5 h-4.5 sm:w-6 sm:h-6" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-black text-gray-900">Nouvelle Facture</h2>
-                  <p className="text-xs text-gray-500 font-medium uppercase tracking-widest mt-0.5">Création manuelle d'une facture</p>
+                  <h2 className="text-base sm:text-xl font-black text-gray-900 leading-tight">Nouvelle Facture</h2>
+                  <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider mt-0.5">Création manuelle de facture</p>
                 </div>
               </div>
               <button onClick={() => setIsNewInvoiceModalOpen(false)} className="p-2 text-gray-400 hover:text-gray-600 rounded-lg">
-                <X className="w-6 h-6" />
+                <X className="w-5 h-5 sm:w-6 sm:h-6" />
               </button>
             </div>
 
-            <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
+            <div className="flex-1 overflow-y-auto md:overflow-hidden flex flex-col md:flex-row">
               {/* Left Side: Product Selection */}
-              <div className="flex-1 flex flex-col border-r border-green-800 bg-gray-50/30">
-                <div className="p-6 space-y-4">
+              <div className="flex-1 flex flex-col border-b md:border-b-0 md:border-r border-green-800 bg-gray-50/30">
+                <div className="p-4 sm:p-6 space-y-4">
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                     <input
                       type="text"
                       placeholder="Rechercher un produit..."
-                      className="w-full pl-10 pr-4 py-3 bg-white border border-green-800 rounded-2xl focus:ring-2 focus:ring-green-500/20 focus:border-green-500 outline-none transition-all"
+                      className="w-full pl-10 pr-4 py-2.5 sm:py-3 bg-white border border-green-800 rounded-2xl focus:ring-2 focus:ring-green-500/20 focus:border-green-500 outline-none transition-all text-xs font-semibold"
                       value={productSearch}
                       onChange={(e) => setProductSearch(e.target.value)}
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 overflow-y-auto max-h-[50vh] pr-2">
+                  <div className="grid grid-cols-2 gap-2.5 sm:gap-3 overflow-y-auto max-h-[35vh] md:max-h-[50vh] pr-1 sm:pr-2">
                     {filteredProducts.map(product => (
                       <button
                         key={product.id}
                         onClick={() => addToCart(product)}
                         disabled={product.stock <= 0}
                         className={cn(
-                          "p-4 rounded-2xl border text-left transition-all group relative overflow-hidden",
+                          "p-2.5 sm:p-3 rounded-2xl border text-left transition-all group relative overflow-hidden flex flex-col justify-between h-[125px] sm:h-[130px] min-w-0 w-full cursor-pointer",
                           product.stock > 0 
                             ? "bg-white border-green-800 hover:border-green-500 hover:shadow-md active:scale-95" 
                             : "bg-gray-50 border-green-800 opacity-60 grayscale cursor-not-allowed"
                         )}
                       >
-                        <div className="font-bold text-gray-900 truncate">{product.name}</div>
-                        <div className="text-xs text-gray-500 mt-1 font-mono">{product.sellPrice.toFixed(2)} {storeSettings?.currency || 'DT'}</div>
-                        <div className={cn(
-                          "text-[10px] font-bold mt-2 uppercase tracking-tighter",
-                          product.stock <= (product.lowStockAlert || 5) ? "text-red-500" : "text-green-600"
-                        )}>
-                          Stock: {product.stock}
+                        <div className="flex-1 flex items-start min-w-0 w-full mb-1">
+                          <div 
+                            className="font-extrabold text-gray-900 text-[11px] sm:text-xs leading-tight sm:leading-snug break-words whitespace-normal overflow-hidden line-clamp-2 text-ellipsis group-hover:text-green-700 w-full"
+                            style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}
+                          >
+                            {product.name}
+                          </div>
                         </div>
+                        <div className="w-full pt-1.5 mt-auto border-t border-green-50 flex flex-col gap-0.5 leading-tight shrink-0">
+                          <div className="text-[11px] sm:text-xs text-gray-600 font-bold font-mono truncate">
+                            {product.sellPrice.toFixed(3)} {storeSettings?.currency || 'DT'}
+                          </div>
+                          <div className={cn(
+                            "text-[8px] sm:text-[10px] font-extrabold uppercase tracking-wider",
+                            product.stock <= (product.lowStockAlert || 5) ? "text-red-500" : "text-green-600"
+                          )}>
+                            Stock: {product.stock}
+                          </div>
+                        </div>
+                        {product.stock <= 0 && (
+                          <div className="absolute inset-0 bg-white/50 backdrop-blur-[1px] flex items-center justify-center p-1 text-center">
+                            <span className="bg-red-600 text-white px-1.5 py-0.5 rounded-md text-[8px] sm:text-[9px] font-black uppercase tracking-wider shadow-md">
+                              Rupture
+                            </span>
+                          </div>
+                        )}
                       </button>
                     ))}
                   </div>
@@ -468,15 +504,19 @@ export default function Invoices() {
 
               {/* Right Side: Cart & Client */}
               <div className="w-full md:w-[400px] flex flex-col bg-white">
-                <div className="p-6 border-b border-green-800 space-y-4">
+                <div className="p-4 sm:p-6 border-b border-green-800 space-y-4">
                   <div>
                     <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-2">Client</label>
                     <select
-                      className="w-full px-4 py-3 bg-gray-50 border border-green-800 rounded-2xl focus:ring-2 focus:ring-green-500/20 focus:border-green-500 outline-none transition-all text-sm font-medium"
+                      className="w-full px-3.5 py-3.5 sm:py-3 bg-gray-50 border border-green-800 rounded-2xl focus:ring-2 focus:ring-green-500/20 focus:border-green-500 outline-none transition-all text-sm font-semibold text-slate-755"
                       value={selectedClient?.id || ''}
                       onChange={(e) => {
                         const client = clients.find(c => c.id === e.target.value);
                         setSelectedClient(client || null);
+                        if (!client) {
+                          setPaidAmount(cartTotal);
+                          setPaidAmountInput(cartTotal.toFixed(3));
+                        }
                       }}
                     >
                       <option value="">Client de passage</option>
@@ -489,27 +529,27 @@ export default function Invoices() {
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
                   <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Articles</label>
                   {cart.length === 0 ? (
-                    <div className="text-center py-10 text-gray-400 italic text-sm">Panier vide</div>
+                    <div className="text-center py-8 text-gray-400 italic text-xs">Panier vide</div>
                   ) : (
                     <div className="space-y-3">
                       {cart.map(item => (
                         <div key={item.productId} className="flex items-center justify-between p-3 bg-gray-50 rounded-2xl border border-green-800">
                           <div className="flex-1 min-w-0 pr-4">
-                            <div className="font-bold text-gray-900 text-sm truncate">{item.name}</div>
-                            <div className="text-xs text-gray-500 font-mono">{item.price.toFixed(2)} {storeSettings?.currency || 'DT'} x {item.quantity}</div>
+                            <div className="font-extrabold text-gray-900 text-xs truncate">{item.name}</div>
+                            <div className="text-[10px] text-gray-500 font-mono mt-0.5">{item.price.toFixed(3)} {storeSettings?.currency || 'DT'} x {item.quantity}</div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <button onClick={() => updateQuantity(item.productId, -1)} className="p-1 hover:bg-white rounded-lg text-gray-400 hover:text-gray-600">
-                              <Minus className="w-4 h-4" />
+                          <div className="flex items-center gap-1.5 sm:gap-2">
+                            <button onClick={() => updateQuantity(item.productId, -1)} className="w-8 h-8 rounded-lg bg-white border border-slate-150 flex items-center justify-center hover:bg-slate-100 text-slate-500 active:scale-90 transition-transform">
+                              <Minus className="w-3.5 h-3.5" />
                             </button>
-                            <span className="w-6 text-center font-bold text-sm">{item.quantity}</span>
-                            <button onClick={() => updateQuantity(item.productId, 1)} className="p-1 hover:bg-white rounded-lg text-gray-400 hover:text-gray-600">
-                              <Plus className="w-4 h-4" />
+                            <span className="w-5 text-center font-bold text-xs">{item.quantity}</span>
+                            <button onClick={() => updateQuantity(item.productId, 1)} className="w-8 h-8 rounded-lg bg-white border border-slate-150 flex items-center justify-center hover:bg-slate-100 text-slate-500 active:scale-90 transition-transform">
+                              <Plus className="w-3.5 h-3.5" />
                             </button>
-                            <button onClick={() => removeFromCart(item.productId)} className="ml-2 p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg">
+                            <button onClick={() => removeFromCart(item.productId)} className="ml-1 p-1 text-red-500 hover:text-red-750 hover:bg-red-50 rounded-lg">
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
@@ -519,23 +559,23 @@ export default function Invoices() {
                   )}
                 </div>
 
-                <div className="p-6 bg-gray-50 border-t border-green-800 space-y-4">
-                  <div className="space-y-2">
+                <div className="p-4 sm:p-6 bg-gray-50 border-t border-green-800 space-y-4">
+                  <div className="space-y-1.5">
                     {storeSettings?.tvaEnabled !== false && (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-500">Sous-total</span>
-                        <span className="font-mono font-bold">{subtotal.toFixed(2)} {storeSettings?.currency || 'DT'}</span>
+                      <div className="flex justify-between text-xs sm:text-sm">
+                        <span className="text-gray-500 font-semibold">Sous-total</span>
+                        <span className="font-mono font-bold">{subtotal.toFixed(3)} {storeSettings?.currency || 'DT'}</span>
                       </div>
                     )}
                     {storeSettings?.tvaEnabled !== false && (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-500">TVA ({storeSettings?.tva || 19}%)</span>
-                        <span className="font-mono font-bold">{tvaAmount.toFixed(2)} {storeSettings?.currency || 'DT'}</span>
+                      <div className="flex justify-between text-xs sm:text-sm">
+                        <span className="text-gray-500 font-semibold">TVA ({storeSettings?.tva || 19}%)</span>
+                        <span className="font-mono font-bold">{tvaAmount.toFixed(3)} {storeSettings?.currency || 'DT'}</span>
                       </div>
                     )}
-                    <div className="flex justify-between text-lg pt-2 border-t border-green-800">
+                    <div className="flex justify-between text-base sm:text-lg pt-1.5 border-t border-green-800">
                       <span className="font-black text-gray-900">TOTAL</span>
-                      <span className="font-black text-green-700 font-mono">{cartTotal.toFixed(2)} {storeSettings?.currency || 'DT'}</span>
+                      <span className="font-black text-green-700 font-mono">{cartTotal.toFixed(3)} {storeSettings?.currency || 'DT'}</span>
                     </div>
                   </div>
 
@@ -544,30 +584,44 @@ export default function Invoices() {
                     <input
                       type="text"
                       inputMode="decimal"
-                      className="w-full px-4 py-3 bg-white border border-green-800 rounded-2xl focus:ring-2 focus:ring-green-500/20 focus:border-green-500 outline-none font-mono font-bold"
+                      className="w-full px-4 py-3 bg-white border border-green-800 rounded-2xl focus:ring-2 focus:ring-green-500/20 focus:border-green-500 outline-none font-mono font-black text-sm"
                       value={paidAmountInput}
                       onFocus={() => setIsPaidFocused(true)}
                       onBlur={() => {
                         setIsPaidFocused(false);
                         const parsed = parseFloat(paidAmountInput) || 0;
-                        setPaidAmountInput(parsed === 0 ? '' : parsed.toString());
-                        setPaidAmount(parsed);
+                        const rounded = Math.round(parsed * 1000) / 1000;
+                        setPaidAmountInput(rounded === 0 ? '' : rounded.toFixed(3));
+                        setPaidAmount(rounded);
                       }}
                       onChange={(e) => {
                         const value = e.target.value.replace(',', '.');
                         if (value === '' || /^\d*\.?\d*$/.test(value)) {
                           setPaidAmountInput(value);
-                          setPaidAmount(parseFloat(value) || 0);
+                          const parsed = parseFloat(value) || 0;
+                          setPaidAmount(Math.round(parsed * 1000) / 1000);
                         }
                       }}
-                      placeholder="0.00"
+                      placeholder="0.000"
                     />
                   </div>
 
-                  {remainingDebt > 0 && (
-                    <div className="p-3 bg-red-50 rounded-xl border border-red-100 flex items-center justify-between">
-                      <span className="text-xs font-bold text-red-700 uppercase tracking-widest">Dette</span>
-                      <span className="font-mono font-bold text-red-700">{remainingDebt.toFixed(2)} {storeSettings?.currency || 'DT'}</span>
+                  {/* Reste à payer / Dette */}
+                  <div className="p-3 bg-white border border-slate-150 rounded-2xl flex items-center justify-between">
+                    <span className="text-[11px] sm:text-xs font-black text-slate-500 uppercase tracking-wider">Reste à payer</span>
+                    <span className={cn(
+                      "font-mono font-black text-sm",
+                      remainingDebt > 0 ? "text-red-750" : "text-emerald-700"
+                    )}>
+                      {remainingDebt.toFixed(3)} {storeSettings?.currency || 'DT'}
+                    </span>
+                  </div>
+
+                  {/* Warning de paiement pour client passager */}
+                  {!selectedClient && Math.abs(paidAmount - cartTotal) > 0.001 && (
+                    <div className="text-[11px] text-red-700 font-semibold bg-red-50 border border-red-100 rounded-xl p-3 flex items-center gap-1.5 animate-in fade-in duration-200">
+                      <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
+                      <span>Le paiement pour un client passager doit correspondre exactement au montant total ({cartTotal.toFixed(3)} {storeSettings?.currency || 'DT'}).</span>
                     </div>
                   )}
 
@@ -618,53 +672,53 @@ export default function Invoices() {
 
       {/* Invoice Detail Modal */}
       {selectedInvoice && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden border border-green-800 flex flex-col max-h-[90vh]">
-            <div className="px-8 py-6 border-b border-green-800 flex items-center justify-between bg-gray-50/50">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-2 sm:p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden border border-green-800 flex flex-col max-h-[92vh] sm:max-h-[90vh]">
+            <div className="px-5 py-4 sm:px-8 sm:py-6 border-b border-green-800 flex items-center justify-between bg-gray-50/50">
               <div>
-                <h2 className="text-xl font-black text-gray-900">Facture {selectedInvoice.number}</h2>
-                <p className="text-xs text-gray-500 font-mono uppercase tracking-widest mt-1">Date: {selectedInvoice.date?.toDate ? format(selectedInvoice.date.toDate(), 'PPP p', { locale: fr }) : 'Inconnue'}</p>
+                <h2 className="text-base sm:text-lg font-black text-gray-900">Facture {selectedInvoice.number}</h2>
+                <p className="text-[10px] text-gray-500 font-mono uppercase tracking-widest mt-1">Date: {selectedInvoice.date?.toDate ? format(selectedInvoice.date.toDate(), 'PPP p', { locale: fr }) : 'Inconnue'}</p>
               </div>
               <button onClick={() => setSelectedInvoice(null)} className="p-2 text-gray-400 hover:text-gray-600 rounded-lg">
-                <X className="w-6 h-6" />
+                <X className="w-5 h-5 sm:w-6 sm:h-6" />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-8 space-y-8">
-              <div className="grid grid-cols-2 gap-8">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-8 space-y-5 sm:space-y-8">
+              <div className="grid grid-cols-2 gap-4 sm:gap-8">
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Client</label>
-                  <div className="text-gray-900 font-bold">{selectedInvoice.clientName}</div>
-                  {selectedInvoice.clientCode && <div className="text-xs text-gray-500 font-mono">Code: {selectedInvoice.clientCode}</div>}
-                  {selectedInvoice.clientPhone && <div className="text-xs text-gray-500">{selectedInvoice.clientPhone}</div>}
-                  {selectedInvoice.clientAddress && <div className="text-xs text-gray-500 italic">{selectedInvoice.clientAddress}</div>}
+                  <div className="text-gray-900 font-extrabold text-xs sm:text-sm">{selectedInvoice.clientName}</div>
+                  {selectedInvoice.clientCode && <div className="text-[10px] text-gray-500 font-mono">Code: {selectedInvoice.clientCode}</div>}
+                  {selectedInvoice.clientPhone && <div className="text-[10px] text-gray-500">{selectedInvoice.clientPhone}</div>}
+                  {selectedInvoice.clientAddress && <div className="text-[10px] text-gray-500 italic truncate max-w-[120px] sm:max-w-none">{selectedInvoice.clientAddress}</div>}
                 </div>
                 <div className="space-y-1 text-right">
                   <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Magasin</label>
-                  <div className="text-gray-900 font-bold text-green-700">{storeSettings?.storeName || 'SmarTech Solution'}</div>
-                  <div className="text-xs text-gray-500">{storeSettings?.address || 'Tunisie'}</div>
-                  {storeSettings?.phone && <div className="text-xs text-gray-500">{storeSettings.phone}</div>}
+                  <div className="text-gray-900 font-bold text-xs sm:text-sm text-green-700">{storeSettings?.storeName || 'SmarTech Solution'}</div>
+                  <div className="text-[10px] text-gray-500">{storeSettings?.address || 'Tunisie'}</div>
+                  {storeSettings?.phone && <div className="text-[10px] text-gray-500">{storeSettings.phone}</div>}
                 </div>
               </div>
 
               <div className="space-y-4">
-                <div className="bg-gray-50 rounded-2xl border border-green-800 overflow-hidden">
-                  <table className="w-full text-left border-collapse">
+                <div className="bg-gray-50 rounded-2xl border border-green-800 overflow-x-auto">
+                  <table className="w-full text-left border-collapse min-w-[380px] sm:min-w-0">
                     <thead>
                       <tr className="text-[10px] font-bold text-gray-400 uppercase tracking-widest border-b border-green-800">
-                        <th className="px-6 py-3">Produit</th>
-                        <th className="px-6 py-3 text-center">Qté</th>
-                        <th className="px-6 py-3 text-right">Prix</th>
-                        <th className="px-6 py-3 text-right">Total</th>
+                        <th className="px-4 py-2.5 sm:px-6 sm:py-3">Produit</th>
+                        <th className="px-4 py-2.5 sm:px-6 sm:py-3 text-center">Qté</th>
+                        <th className="px-4 py-2.5 sm:px-6 sm:py-3 text-right">Prix</th>
+                        <th className="px-4 py-2.5 sm:px-6 sm:py-3 text-right">Total</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-green-800">
+                    <tbody className="divide-y divide-green-800/40">
                       {selectedInvoice.items.map((item, idx) => (
-                        <tr key={idx} className="text-sm">
-                          <td className="px-6 py-3 font-bold text-gray-900">{item.name}</td>
-                          <td className="px-6 py-3 text-center font-mono">{item.quantity}</td>
-                          <td className="px-6 py-3 text-right font-mono">{item.price.toFixed(2)}</td>
-                          <td className="px-6 py-3 text-right font-black text-green-700 font-mono">{item.total.toFixed(2)} {storeSettings?.currency || 'DT'}</td>
+                        <tr key={idx} className="text-xs sm:text-sm">
+                          <td className="px-4 py-2.5 sm:px-6 sm:py-3 font-bold text-gray-900">{item.name}</td>
+                          <td className="px-4 py-2.5 sm:px-6 sm:py-3 text-center font-mono">{item.quantity}</td>
+                          <td className="px-4 py-2.5 sm:px-6 sm:py-3 text-right font-mono">{item.price.toFixed(3)}</td>
+                          <td className="px-4 py-2.5 sm:px-6 sm:py-3 text-right font-black text-green-700 font-mono">{item.total.toFixed(3)} {storeSettings?.currency || 'DT'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -672,49 +726,49 @@ export default function Invoices() {
                 </div>
               </div>
 
-              <div className="bg-gray-900 text-white p-8 rounded-3xl space-y-4 shadow-xl shadow-gray-900/20">
+              <div className="bg-gray-900 text-white p-5 sm:p-8 rounded-3xl space-y-3 sm:space-y-4 shadow-xl shadow-gray-900/20">
                 {selectedInvoice.tva > 0 && (
                   <div className="flex justify-between items-center opacity-70">
-                    <span className="text-sm uppercase tracking-widest font-bold">Sous-total</span>
-                    <span className="font-mono">{(selectedInvoice.total - selectedInvoice.tva).toFixed(2)} {storeSettings?.currency || 'DT'}</span>
+                    <span className="text-xs uppercase tracking-widest font-bold">Sous-total</span>
+                    <span className="font-mono text-xs sm:text-sm">{(selectedInvoice.total - selectedInvoice.tva).toFixed(3)} {storeSettings?.currency || 'DT'}</span>
                   </div>
                 )}
                 {selectedInvoice.tva > 0 && (
                   <div className="flex justify-between items-center opacity-70">
-                    <span className="text-sm uppercase tracking-widest font-bold">TVA ({storeSettings?.tva || 19}%)</span>
-                    <span className="font-mono">{selectedInvoice.tva.toFixed(2)} {storeSettings?.currency || 'DT'}</span>
+                    <span className="text-xs uppercase tracking-widest font-bold">TVA ({storeSettings?.tva || 19}%)</span>
+                    <span className="font-mono text-xs sm:text-sm">{selectedInvoice.tva.toFixed(3)} {storeSettings?.currency || 'DT'}</span>
                   </div>
                 )}
                 <div className="flex justify-between items-center pt-2 border-t border-white/10">
-                  <span className="text-sm uppercase tracking-widest font-bold">Total Général</span>
-                  <span className="text-2xl font-black font-mono">{selectedInvoice.total.toFixed(2)} {storeSettings?.currency || 'DT'}</span>
+                  <span className="text-xs uppercase tracking-widest font-bold">Total Général</span>
+                  <span className="text-base sm:text-2xl font-black font-mono text-green-400">{selectedInvoice.total.toFixed(3)} {storeSettings?.currency || 'DT'}</span>
                 </div>
                 <div className="flex justify-between items-center opacity-70">
-                  <span className="text-sm uppercase tracking-widest font-bold">Payé</span>
-                  <span className="font-mono">{selectedInvoice.paid.toFixed(2)} {storeSettings?.currency || 'DT'}</span>
+                  <span className="text-xs uppercase tracking-widest font-bold">Payé</span>
+                  <span className="font-mono text-xs sm:text-sm">{selectedInvoice.paid.toFixed(3)} {storeSettings?.currency || 'DT'}</span>
                 </div>
                 {selectedInvoice.debt > 0 && (
                   <div className="flex justify-between items-center text-red-400 pt-2 border-t border-white/10">
-                    <span className="text-sm uppercase tracking-widest font-bold">Reste à payer</span>
-                    <span className="text-xl font-black font-mono">{selectedInvoice.debt.toFixed(2)} {storeSettings?.currency || 'DT'}</span>
+                    <span className="text-xs uppercase tracking-widest font-bold">Reste à payer</span>
+                    <span className="text-base sm:text-xl font-black font-mono">{selectedInvoice.debt.toFixed(3)} {storeSettings?.currency || 'DT'}</span>
                   </div>
                 )}
               </div>
             </div>
 
-            <div className="p-8 border-t border-green-800 bg-gray-50/50 flex gap-4">
+            <div className="p-4 sm:p-8 border-t border-green-800 bg-gray-50/50 flex flex-col sm:flex-row gap-3 sm:gap-4">
               <button 
                 onClick={() => downloadPDF(selectedInvoice)}
-                className="flex-1 py-4 bg-green-700 text-white font-bold rounded-2xl hover:bg-green-800 transition-all flex items-center justify-center gap-2 shadow-lg shadow-green-700/20"
+                className="flex-1 py-3.5 sm:py-4 bg-green-700 text-white font-extrabold rounded-2xl hover:bg-green-800 transition-all flex items-center justify-center gap-2 shadow-lg shadow-green-700/20 text-xs sm:text-sm cursor-pointer"
               >
-                <Download className="w-5 h-5" />
+                <Download className="w-4 h-4 sm:w-5 sm:h-5 font-black" />
                 Télécharger PDF
               </button>
               <button 
                 onClick={handlePrint}
-                className="flex-1 py-4 bg-white border border-green-800 text-gray-900 font-bold rounded-2xl hover:bg-gray-100 transition-all flex items-center justify-center gap-2"
+                className="flex-1 py-3.5 sm:py-4 bg-white border border-green-800 text-gray-900 font-extrabold rounded-2xl hover:bg-gray-100 transition-all flex items-center justify-center gap-2 text-xs sm:text-sm cursor-pointer"
               >
-                <Printer className="w-5 h-5" />
+                <Printer className="w-4 h-4 sm:w-5 sm:h-5 font-black" />
                 Imprimer Ticket
               </button>
             </div>

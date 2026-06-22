@@ -126,12 +126,12 @@ export default function Sales() {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="text-sm font-black text-gray-900 font-mono">{sale.total.toFixed(2)} DT</div>
+                      <div className="text-sm font-black text-gray-900 font-mono">{sale.total.toFixed(3)} DT</div>
                     </td>
                     <td className="px-6 py-4">
                       {sale.debt > 0 ? (
                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-700">
-                          Partiel (-{sale.debt.toFixed(2)} DT)
+                          Partiel (-{sale.debt.toFixed(3)} DT)
                         </span>
                       ) : (
                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">
@@ -206,8 +206,8 @@ export default function Sales() {
                         <tr key={idx} className="text-sm">
                           <td className="px-6 py-3 font-bold text-gray-900">{item.name}</td>
                           <td className="px-6 py-3 text-center font-mono">{item.quantity}</td>
-                          <td className="px-6 py-3 text-right font-mono">{item.price.toFixed(2)}</td>
-                          <td className="px-6 py-3 text-right font-black text-indigo-600 font-mono">{item.total.toFixed(2)} DT</td>
+                          <td className="px-6 py-3 text-right font-mono">{item.price.toFixed(3)}</td>
+                          <td className="px-6 py-3 text-right font-black text-indigo-600 font-mono">{item.total.toFixed(3)} DT</td>
                         </tr>
                       ))}
                     </tbody>
@@ -218,16 +218,16 @@ export default function Sales() {
               <div className="bg-gray-900 text-white p-8 rounded-3xl space-y-4 shadow-xl shadow-gray-900/20">
                 <div className="flex justify-between items-center opacity-70">
                   <span className="text-sm uppercase tracking-widest font-bold">Total Vente</span>
-                  <span className="font-mono">{selectedSale.total.toFixed(2)} DT</span>
+                  <span className="font-mono">{selectedSale.total.toFixed(3)} DT</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-sm uppercase tracking-widest font-bold">Montant Payé</span>
-                  <span className="text-xl font-black font-mono">{selectedSale.paid.toFixed(2)} DT</span>
+                  <span className="text-xl font-black font-mono">{selectedSale.paid.toFixed(3)} DT</span>
                 </div>
                 {selectedSale.debt > 0 && (
                   <div className="flex justify-between items-center text-red-400 pt-2 border-t border-white/10">
                     <span className="text-sm uppercase tracking-widest font-bold">Reste à payer (Dette)</span>
-                    <span className="text-xl font-black font-mono">{selectedSale.debt.toFixed(2)} DT</span>
+                    <span className="text-xl font-black font-mono">{selectedSale.debt.toFixed(3)} DT</span>
                   </div>
                 )}
               </div>

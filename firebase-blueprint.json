@@ -123,6 +123,20 @@
         "userId": { "type": "string", "description": "Créateur" }
       },
       "required": ["title", "content", "date", "createdAt", "userId"]
+    },
+    "Supply": {
+      "title": "Supply",
+      "description": "Un enregistrement d'approvisionnement ou de dépenses de stock",
+      "type": "object",
+      "properties": {
+        "productId": { "type": "string", "description": "ID du produit" },
+        "productName": { "type": "string", "description": "Nom du produit" },
+        "quantity": { "type": "number", "description": "Quantité d'approvisionnement" },
+        "buyPrice": { "type": "number", "description": "Prix d'achat unitaire" },
+        "totalCost": { "type": "number", "description": "Coût total" },
+        "date": { "type": "string", "format": "date-time", "description": "Date et heure de l'approvisionnement" }
+      },
+      "required": ["productId", "productName", "quantity", "buyPrice", "totalCost", "date"]
     }
   },
   "firestore": {
@@ -134,6 +148,7 @@
     "/settings": { "schema": "StoreSettings", "description": "Paramètres de l'application" },
     "/categories": { "schema": "Category", "description": "Liste des catégories" },
     "/users": { "schema": "UserProfile", "description": "Liste des utilisateurs et leurs rôles" },
-    "/notes": { "schema": "Note", "description": "Liste des notes et mémos" }
+    "/notes": { "schema": "Note", "description": "Liste des notes et mémos" },
+    "/supplies": { "schema": "Supply", "description": "Liste des approvisionnements de stock" }
   }
 }

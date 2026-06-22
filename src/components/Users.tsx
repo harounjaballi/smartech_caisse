@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, query } from 'firebase/firestore';
+import { collection, onSnapshot, query, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
+import { initializeApp } from 'firebase/app';
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateEmail, updatePassword, deleteUser } from 'firebase/auth';
+import firebaseConfig from '../../firebase-applet-config.json';
 import { UserProfile } from '../types';
 import { 
   Users as UsersIcon, 
@@ -120,23 +123,28 @@ export default function Users() {
       return;
     }
 
+    const tempAppName = 'TempUserCreation_' + Date.now();
+    let tempApp: any = null;
     try {
-      // Create user securely through our node.js backend API (updates both Auth and Firestore)
-      const response = await fetch('/api/admin/users/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: emailInput,
-          password: passwordInput,
-          role: roleInput,
-          allowedMenus: selectedMenus
-        })
+      tempApp = initializeApp(firebaseConfig, tempAppName);
+      const tempAuth = getAuth(tempApp);
+
+      // 1. Create the user in Firebase Auth under the user's project
+      const userCred = await createUserWithEmailAndPassword(tempAuth, emailInput, passwordInput);
+      const targetUid = userCred.user.uid;
+
+      // 2. Create the document in Firestore using the logged-in admin's handle
+      await setDoc(doc(db, "users", targetUid), {
+        uid: targetUid,
+        email: emailInput,
+        password: passwordInput,
+        role: roleInput,
+        status: 'active',
+        allowedMenus: selectedMenus
       });
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Erreur lors de la création du compte.');
-      }
+      // 3. Log out of transient app
+      await tempAuth.signOut();
 
       setSuccess('Utilisateur créé avec succès ! Identifiants enregistrés dans le système.');
       setIsModalOpen(false);
@@ -150,6 +158,13 @@ export default function Users() {
       console.error(err);
       setErrorOnCreate(err.message || 'Une erreur est survenue.');
     } finally {
+      if (tempApp) {
+        try {
+          await tempApp.delete();
+        } catch (delErr) {
+          console.error(delErr);
+        }
+      }
       setActionLoading(null);
     }
   };
@@ -186,24 +201,40 @@ export default function Users() {
       return;
     }
 
+    const tempAppName = 'TempUserUpdate_' + Date.now();
+    let tempApp: any = null;
     try {
-      const response = await fetch('/api/admin/users/update', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          uid: editingUser.uid,
-          email: editEmail,
-          password: editPassword,
-          role: editRole,
-          status: editStatus,
-          allowedMenus: editSelectedMenus
-        })
-      });
+      const emailChanged = editEmail !== editingUser.email;
+      const passwordChanged = editPassword !== editingUser.password;
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Erreur lors de la mise à jour.');
+      // If email or password changed, update Firebase Auth using secondary credentials login
+      if (emailChanged || passwordChanged) {
+        tempApp = initializeApp(firebaseConfig, tempAppName);
+        const tempAuth = getAuth(tempApp);
+
+        const oldEmail = editingUser.email || '';
+        const oldPassword = editingUser.password || '';
+        const userCred = await signInWithEmailAndPassword(tempAuth, oldEmail, oldPassword);
+
+        if (emailChanged) {
+          await updateEmail(userCred.user, editEmail);
+        }
+        if (passwordChanged) {
+          await updatePassword(userCred.user, editPassword);
+        }
+
+        await tempAuth.signOut();
       }
+
+      // Update in Firestore using the logged-in admin's handles
+      const userRef = doc(db, "users", editingUser.uid);
+      await updateDoc(userRef, {
+        email: editEmail,
+        password: editPassword,
+        role: editRole,
+        status: editStatus,
+        allowedMenus: editSelectedMenus
+      });
 
       setSuccess(`Utilisateur ${editEmail} mis à jour avec succès.`);
       setEditingUser(null);
@@ -212,6 +243,13 @@ export default function Users() {
       console.error(err);
       setErrorOnEdit(err.message || 'Une erreur est survenue lors de la modification.');
     } finally {
+      if (tempApp) {
+        try {
+          await tempApp.delete();
+        } catch (delErr) {
+          console.error(delErr);
+        }
+      }
       setActionLoading(null);
     }
   };
@@ -223,19 +261,11 @@ export default function Users() {
     }
 
     try {
-      const response = await fetch('/api/admin/users/update', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          uid: user.uid,
-          status: newStatus
-        })
+      // Directly check and update in Firestore using active session
+      const userRef = doc(db, "users", user.uid);
+      await updateDoc(userRef, {
+        status: newStatus
       });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Erreur lors de la mise à jour du statut.');
-      }
 
       setSuccess(`L'utilisateur ${user.email} est désormais ${newStatus === 'banned' ? 'banni' : 'actif'}.`);
       setTimeout(() => setSuccess(null), 3000);
@@ -249,22 +279,35 @@ export default function Users() {
       return;
     }
 
+    const tempAppName = 'TempUserDelete_' + Date.now();
+    let tempApp: any = null;
     try {
-      const response = await fetch('/api/admin/users/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ uid: user.uid })
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Erreur lors de la suppression.');
+      if (user.email && user.password) {
+        tempApp = initializeApp(firebaseConfig, tempAppName);
+        const tempAuth = getAuth(tempApp);
+        try {
+          const userCred = await signInWithEmailAndPassword(tempAuth, user.email, user.password);
+          await deleteUser(userCred.user);
+        } catch (authErr) {
+          console.warn("Could not delete from Firebase Auth (maybe already gone/changed):", authErr);
+        }
       }
+
+      // Delete from Firestore
+      await deleteDoc(doc(db, "users", user.uid));
 
       setSuccess(`Compte et identifiants de ${user.email} supprimés définitivement.`);
       setTimeout(() => setSuccess(null), 3500);
     } catch (err: any) {
       alert(err.message || "Erreur lors de la suppression.");
+    } finally {
+      if (tempApp) {
+        try {
+          await tempApp.delete();
+        } catch (delErr) {
+          console.error(delErr);
+        }
+      }
     }
   };
 

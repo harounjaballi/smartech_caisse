@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
-import { auth } from '../firebase';
+import { collection, query, where, getDocs, setDoc, doc } from 'firebase/firestore';
+import { auth, db } from '../firebase';
 import { ShoppingCart, Mail, Lock, AlertCircle, Chrome } from 'lucide-react';
 
 export default function Login() {
@@ -30,15 +31,91 @@ export default function Login() {
 
     try {
       if (isRegistering) {
-        await createUserWithEmailAndPassword(auth, email, password);
+        try {
+          await createUserWithEmailAndPassword(auth, email, password);
+        } catch (regErr: any) {
+          console.warn("Standard Auth registration failed, checking if we can save to Firestore fallback...", regErr);
+          
+          // Fallback if Firebase Identity Toolkit is not enabled
+          const isAuthDisabled = regErr.code === 'auth/operation-not-allowed' || 
+                                 regErr.message?.includes('identitytoolkit') || 
+                                 regErr.message?.includes('auth/admin-restricted-operation') ||
+                                 regErr.message?.includes('PERMISSION_DENIED');
+          
+          if (isAuthDisabled) {
+            // Check if email already exists in Firestore user accounts
+            const usersRef = collection(db, 'users');
+            const q = query(usersRef, where('email', '==', email));
+            const snap = await getDocs(q);
+            
+            if (!snap.empty) {
+              throw new Error("Cet email est déjà utilisé dans notre base de données.");
+            }
+            
+            const newUid = 'user_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
+            const isFirst = email === 'harounjaballi@gmail.com';
+            const defaultAllowed = isFirst
+              ? ['dashboard', 'pos', 'products', 'clients', 'sales', 'invoices', 'notes', 'users', 'settings']
+              : ['dashboard', 'pos', 'products', 'clients', 'sales', 'invoices', 'notes'];
+              
+            const profileData = {
+              uid: newUid,
+              email: email,
+              password: password,
+              role: isFirst ? 'admin' : 'user',
+              status: 'active',
+              allowedMenus: defaultAllowed
+            };
+            
+            await setDoc(doc(db, 'users', newUid), profileData);
+            
+            // Set local custom session and reload
+            localStorage.setItem('custom_session', JSON.stringify(profileData));
+            window.dispatchEvent(new Event('storage'));
+            window.location.reload();
+            return;
+          } else {
+            throw regErr;
+          }
+        }
       } else {
-        await signInWithEmailAndPassword(auth, email, password);
+        try {
+          await signInWithEmailAndPassword(auth, email, password);
+        } catch (loginErr: any) {
+          console.warn("Standard Firebase Auth sign-in failed, trying Firestore fallback...", loginErr);
+          
+          // Check in Firestore for user with this email and password
+          const usersRef = collection(db, 'users');
+          const q = query(usersRef, where('email', '==', email), where('password', '==', password));
+          const snap = await getDocs(q);
+          
+          if (!snap.empty) {
+            const userDoc = snap.docs[0];
+            const profileData = userDoc.data();
+            
+            if (profileData.status === 'banned') {
+              throw new Error("Votre compte a été banni. Veuillez contacter l'administrateur.");
+            }
+            
+            // Save local session
+            localStorage.setItem('custom_session', JSON.stringify(profileData));
+            window.dispatchEvent(new Event('storage'));
+            window.location.reload();
+            return;
+          } else {
+            // If the service is disabled or credentials did not match:
+            if (loginErr.message && (loginErr.message.includes('identitytoolkit') || loginErr.message.includes('PERMISSION_DENIED'))) {
+              throw new Error("Identifiants incorrects ou service d'authentification temporairement indisponible.");
+            }
+            throw new Error("Email ou mot de passe incorrect.");
+          }
+        }
       }
     } catch (err: any) {
       if (err.code === 'auth/operation-not-allowed') {
         setError("L'inscription par Email n'est pas activée dans la console Firebase. Utilisez Google ou activez 'Email/Password' dans l'onglet Authentication.");
       } else {
-        setError(err.message);
+        setError(err.message || "Une erreur s'est produite lors de la connexion.");
       }
     } finally {
       setLoading(false);
@@ -47,24 +124,24 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
-      <div className="max-w-md w-full bg-white rounded-2xl shadow-xl shadow-gray-200/50 p-8 border border-gray-100">
-        <div className="text-center mb-10">
+      <div className="max-w-md w-full bg-white rounded-2xl shadow-xl shadow-gray-200/50 p-6 sm:p-8 border border-gray-100">
+        <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-indigo-50 to-cyan-50 text-indigo-600 mb-4 animate-pulse">
             <ShoppingCart className="w-8 h-8 text-indigo-600" />
           </div>
-          <h1 className="text-4xl font-black tracking-tight font-display">
+          <h1 className="text-3xl sm:text-4xl font-black tracking-tight font-display">
             <span className="bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-500 bg-clip-text text-transparent">
               SmarTech Solution
             </span>
-            <span className="block text-xl font-bold text-slate-500 mt-2 font-sans tracking-wide">Gestion de Caisse</span>
+            <span className="block text-lg sm:text-xl font-bold text-slate-500 mt-2 font-sans tracking-wide">Gestion de Caisse</span>
           </h1>
-          <p className="text-gray-500 mt-2">
+          <p className="text-xs sm:text-sm text-gray-500 mt-2">
             {isRegistering ? 'Créer un nouveau compte' : 'Connectez-vous à votre magasin'}
           </p>
         </div>
 
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-xl flex items-center gap-3 text-red-700 text-sm">
+          <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-xl flex items-center gap-3 text-red-700 text-xs sm:text-sm">
             <AlertCircle className="w-5 h-5 flex-shrink-0" />
             <p>{error}</p>
           </div>
@@ -72,30 +149,30 @@ export default function Login() {
 
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Email</label>
+            <label className="block text-sm font-semibold text-gray-750 mb-1.5">Email</label>
             <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
               <input
                 type="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                className="w-full pl-11 pr-4 py-3 sm:py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-sm"
                 placeholder="vendeur@smartech.tn"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">Mot de passe</label>
+            <label className="block text-sm font-semibold text-gray-750 mb-1.5">Mot de passe</label>
             <div className="relative">
-              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
               <input
                 type="password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+                className="w-full pl-11 pr-4 py-3 sm:py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-sm"
                 placeholder="••••••••"
               />
             </div>
@@ -104,7 +181,7 @@ export default function Login() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-indigo-600/20"
+            className="w-full py-3.5 sm:py-3 bg-indigo-600 text-white font-extrabold rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-indigo-600/20 text-sm cursor-pointer"
           >
             {loading ? 'Chargement...' : isRegistering ? "S'inscrire" : 'Se connecter'}
           </button>
@@ -119,7 +196,7 @@ export default function Login() {
         <button
           onClick={handleGoogleLogin}
           disabled={loading}
-          className="mt-6 w-full py-3 bg-white border border-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-colors flex items-center justify-center gap-2 shadow-sm"
+          className="mt-6 w-full py-3.5 sm:py-3 bg-white border border-gray-200 text-gray-700 font-extrabold rounded-xl hover:bg-gray-50 transition-colors flex items-center justify-center gap-2 shadow-sm text-sm cursor-pointer"
         >
           <Chrome className="w-5 h-5 text-blue-600" />
           Se connecter avec Google

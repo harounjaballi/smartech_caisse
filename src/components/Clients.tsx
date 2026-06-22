@@ -243,7 +243,7 @@ export default function Clients() {
                         client.debt > 0 ? "bg-red-50 text-red-700 border-red-100" : "bg-emerald-50 text-emerald-700 border-emerald-100"
                       )}>
                         <Wallet className="w-4 h-4 shrink-0" />
-                        {client.debt.toFixed(2)} {storeSettings?.currency || 'DT'}
+                        {client.debt.toFixed(3)} {storeSettings?.currency || 'DT'}
                       </div>
                     </td>
                     <td className="px-6 py-4 text-right">
@@ -410,7 +410,7 @@ export default function Clients() {
                 <div className="flex justify-between items-center border-t border-slate-200/60 pt-2 text-sm">
                   <span className="text-rose-600 font-black uppercase tracking-wider">Dette Totale</span>
                   <span className="font-black text-rose-600 font-mono text-xl">
-                    {settlingClient.debt.toFixed(2)} {storeSettings?.currency || 'DT'}
+                    {settlingClient.debt.toFixed(3)} {storeSettings?.currency || 'DT'}
                   </span>
                 </div>
               </div>
@@ -439,7 +439,7 @@ export default function Clients() {
                   <button
                     type="button"
                     onClick={() => {
-                      setSettleAmountInput(settlingClient.debt.toString());
+                      setSettleAmountInput(settlingClient.debt.toFixed(3));
                       setSettleAmount(settlingClient.debt);
                     }}
                     className="absolute right-2 top-1/2 -translate-y-1/2 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10px] font-black uppercase tracking-wider rounded-lg border border-emerald-100 transition-colors"
@@ -460,7 +460,7 @@ export default function Clients() {
                   </p>
                   <div className="flex justify-between items-center text-base font-black text-amber-950 font-mono bg-amber-100/40 p-2.5 rounded-xl border border-amber-250/30">
                     <span>Reste de la dette:</span>
-                    <span>{(settlingClient.debt - settleAmount).toFixed(2)} {storeSettings?.currency || 'DT'}</span>
+                    <span>{(settlingClient.debt - settleAmount).toFixed(3)} {storeSettings?.currency || 'DT'}</span>
                   </div>
                   <button
                     type="button"

@@ -247,7 +247,11 @@ function Sidebar({ isOpen, setIsOpen, userProfile, todayNotesCount }: { isOpen: 
 
           <div className="p-4 border-t border-slate-100 bg-slate-50/50">
             <button
-              onClick={() => signOut(auth)}
+              onClick={async () => {
+                localStorage.removeItem('custom_session');
+                await signOut(auth);
+                window.location.reload();
+              }}
               className="flex items-center gap-3 w-full px-4 py-3 rounded-xl text-xs uppercase tracking-wider font-extrabold text-red-600 hover:bg-red-50 hover:text-red-700 transition-colors"
             >
               <LogOut className="w-4 h-4 text-red-500" />
@@ -301,6 +305,46 @@ export default function App() {
 
   useEffect(() => {
     let unsubscribeProfile: (() => void) | null = null;
+
+    // Check custom local session first
+    const storedSession = localStorage.getItem('custom_session');
+    if (storedSession) {
+      try {
+        const profile = JSON.parse(storedSession);
+        setUser({ uid: profile.uid, email: profile.email } as any);
+        setUserProfile(profile);
+        setLoading(false);
+
+        // Listen real-time to this custom user's profile document for ban or privileges changes
+        const userRef = doc(db, 'users', profile.uid);
+        unsubscribeProfile = onSnapshot(userRef, (snap) => {
+          if (snap.exists()) {
+            const profileData = snap.data() as UserProfile;
+            if (profileData.status === 'banned') {
+              if (unsubscribeProfile) {
+                unsubscribeProfile();
+                unsubscribeProfile = null;
+              }
+              localStorage.removeItem('custom_session');
+              setUser(null);
+              setUserProfile(null);
+              alert('Votre compte a été banni. Veuillez contacter l\'administrateur.');
+              window.location.reload();
+            } else {
+              setUserProfile(profileData);
+              localStorage.setItem('custom_session', JSON.stringify(profileData));
+            }
+          }
+        });
+
+        return () => {
+          if (unsubscribeProfile) unsubscribeProfile();
+        };
+      } catch (err) {
+        console.error("Error restoration custom session", err);
+      }
+    }
+
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       if (user) {
         // Ensure user profile exists
@@ -337,14 +381,15 @@ export default function App() {
             setUserProfile(profileData);
           }
         });
+        setUser(user);
       } else {
         if (unsubscribeProfile) {
           unsubscribeProfile();
           unsubscribeProfile = null;
         }
         setUserProfile(null);
+        setUser(null);
       }
-      setUser(user);
       setLoading(false);
     });
 

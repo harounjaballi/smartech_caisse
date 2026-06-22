@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, orderBy, setDoc, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, orderBy, setDoc, getDocs, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Product, Category, StoreSettings } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
 import { Plus, Search, Edit2, Trash2, X, AlertTriangle, Package, Tag, Barcode } from 'lucide-react';
-import { cn } from '../lib/utils';
+import { cn, decodeAzertyBarcode } from '../lib/utils';
 
 export default function Products() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -20,6 +20,11 @@ export default function Products() {
   const [scanMessage, setScanMessage] = useState('');
   const [deletingCatId, setDeletingCatId] = useState<string | null>(null);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+
+  // States for stock replenishment modal
+  const [replenishProduct, setReplenishProduct] = useState<Product | null>(null);
+  const [replenishQty, setReplenishQty] = useState<string>('');
+  const [replenishPrice, setReplenishPrice] = useState<string>('');
 
   const playBeep = (type: 'success' | 'error') => {
     try {
@@ -90,7 +95,7 @@ export default function Products() {
           buffer += e.key;
         }
       } else if (e.key === 'Enter') {
-        const barcode = buffer.trim();
+        const barcode = decodeAzertyBarcode(buffer.trim());
         buffer = '';
         lastKeyTime = 0;
 
@@ -166,9 +171,101 @@ export default function Products() {
     e.preventDefault();
     try {
       if (editingProduct) {
+        const oldStock = editingProduct.stock || 0;
+        const newStock = parseInt(formData.stock.toString()) || 0;
+
+        // Recalculate existing supplies of this product
+        const suppliesRef = collection(db, 'supplies');
+        const q = query(suppliesRef, where('productId', '==', editingProduct.id));
+        const querySnapshot = await getDocs(q);
+
+        for (const d of querySnapshot.docs) {
+          const supplyData = d.data();
+          const pName = formData.name;
+          const bPrice = formData.buyPrice;
+          const qty = supplyData.quantity || 0;
+          const tCost = qty * bPrice;
+
+          await updateDoc(doc(db, 'supplies', d.id), {
+            productName: pName,
+            buyPrice: bPrice,
+            totalCost: tCost
+          });
+        }
+
+        // Add supply adjustment record if stock increased
+        if (newStock > oldStock) {
+          const qtyAdded = newStock - oldStock;
+          const expenseAmount = qtyAdded * formData.buyPrice;
+          await addDoc(collection(db, 'supplies'), {
+            productId: editingProduct.id,
+            productName: formData.name,
+            quantity: qtyAdded,
+            buyPrice: formData.buyPrice,
+            totalCost: expenseAmount,
+            date: new Date()
+          });
+          console.log(`[DEBUG LOG] Produit "Modifié" (Stock Augmenté) de ${editingProduct.name}:`, {
+            productId: editingProduct.id,
+            productName: formData.name,
+            quantity: qtyAdded,
+            buyPrice: formData.buyPrice,
+            calculatedExpense: expenseAmount
+          });
+        } else if (newStock < oldStock) {
+          // Add negative supply adjustment record if stock decreased
+          const qtyRemoved = oldStock - newStock;
+          const expenseAmount = -qtyRemoved * formData.buyPrice;
+          await addDoc(collection(db, 'supplies'), {
+            productId: editingProduct.id,
+            productName: formData.name,
+            quantity: -qtyRemoved,
+            buyPrice: formData.buyPrice,
+            totalCost: expenseAmount,
+            date: new Date()
+          });
+          console.log(`[DEBUG LOG] Produit "Modifié" (Stock Diminué) de ${editingProduct.name}:`, {
+            productId: editingProduct.id,
+            productName: formData.name,
+            quantity: -qtyRemoved,
+            buyPrice: formData.buyPrice,
+            calculatedExpense: expenseAmount
+          });
+        } else {
+          console.log(`[DEBUG LOG] Produit "Modifié" (Stock inchangé) de ${editingProduct.name}:`, {
+            productId: editingProduct.id,
+            productName: formData.name,
+            buyPrice: formData.buyPrice
+          });
+        }
+
         await updateDoc(doc(db, 'products', editingProduct.id), formData);
       } else {
-        await addDoc(collection(db, 'products'), formData);
+        const docRef = await addDoc(collection(db, 'products'), formData);
+        const stockInt = parseInt(formData.stock.toString()) || 0;
+        if (stockInt > 0) {
+          const expenseAmount = stockInt * formData.buyPrice;
+          await addDoc(collection(db, 'supplies'), {
+            productId: docRef.id,
+            productName: formData.name,
+            quantity: stockInt,
+            buyPrice: formData.buyPrice,
+            totalCost: expenseAmount,
+            date: new Date()
+          });
+          console.log(`[DEBUG LOG] Produit "Créé":`, {
+            productId: docRef.id,
+            productName: formData.name,
+            quantity: stockInt,
+            buyPrice: formData.buyPrice,
+            calculatedExpense: expenseAmount
+          });
+        } else {
+          console.log(`[DEBUG LOG] Produit "Créé" sans stock initial:`, {
+            productId: docRef.id,
+            productName: formData.name
+          });
+        }
       }
       closeModal();
     } catch (error) {
@@ -176,10 +273,63 @@ export default function Products() {
     }
   };
 
+  const handleReplenishSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!replenishProduct || !replenishQty) return;
+    try {
+      const qty = parseInt(replenishQty) || 0;
+      const price = parseFloat(replenishPrice) || 0;
+      if (qty <= 0) return;
+
+      const newStock = (replenishProduct.stock || 0) + qty;
+      
+      // Update product stock and buy price
+      await updateDoc(doc(db, 'products', replenishProduct.id), {
+        stock: newStock,
+        buyPrice: price
+      });
+
+      // Log supply entry
+      const expenseAmount = qty * price;
+      await addDoc(collection(db, 'supplies'), {
+        productId: replenishProduct.id,
+        productName: replenishProduct.name,
+        quantity: qty,
+        buyPrice: price,
+        totalCost: expenseAmount,
+        date: new Date()
+      });
+
+      console.log(`[DEBUG LOG] Approvisionnement effectué pour "${replenishProduct.name}":`, {
+        productId: replenishProduct.id,
+        productName: replenishProduct.name,
+        quantity: qty,
+        buyPrice: price,
+        calculatedExpense: expenseAmount
+      });
+
+      setReplenishProduct(null);
+      setReplenishQty('');
+      setReplenishPrice('');
+      playBeep('success');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'products');
+    }
+  };
+
   const executeProductDelete = async () => {
     if (!productToDelete) return;
     try {
+      // Delete associated supplies
+      const suppliesRef = collection(db, 'supplies');
+      const q = query(suppliesRef, where('productId', '==', productToDelete.id));
+      const querySnapshot = await getDocs(q);
+      for (const d of querySnapshot.docs) {
+        await deleteDoc(doc(db, 'supplies', d.id));
+      }
+
       await deleteDoc(doc(db, 'products', productToDelete.id));
+      console.log(`[DEBUG] Produit supprimé: "${productToDelete.name}" (ID: ${productToDelete.id}). Quantité: ${productToDelete.stock}, Prix d'achat: ${productToDelete.buyPrice}. Toutes les dépenses correspondantes ont été supprimées.`);
       setProductToDelete(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'products');
@@ -212,8 +362,8 @@ export default function Products() {
         expirationDate: product.expirationDate || '',
         lowStockAlert: product.lowStockAlert || 5
       });
-      setBuyPriceInput(product.buyPrice.toString());
-      setSellPriceInput(product.sellPrice.toString());
+      setBuyPriceInput(product.buyPrice.toFixed(3));
+      setSellPriceInput(product.sellPrice.toFixed(3));
     } else {
       setEditingProduct(null);
       setFormData({
@@ -371,8 +521,8 @@ export default function Products() {
                         {product.category}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-gray-600 font-mono">{product.buyPrice.toFixed(2)} {storeSettings?.currency || 'DT'}</td>
-                    <td className="px-6 py-4 text-gray-900 font-bold font-mono">{product.sellPrice.toFixed(2)} {storeSettings?.currency || 'DT'}</td>
+                    <td className="px-6 py-4 text-gray-600 font-mono">{product.buyPrice.toFixed(3)} {storeSettings?.currency || 'DT'}</td>
+                    <td className="px-6 py-4 text-gray-900 font-bold font-mono">{product.sellPrice.toFixed(3)} {storeSettings?.currency || 'DT'}</td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
                         <span className={cn(
@@ -389,14 +539,27 @@ export default function Products() {
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button
+                          onClick={() => {
+                            setReplenishProduct(product);
+                            setReplenishQty('');
+                            setReplenishPrice(product.buyPrice.toFixed(3));
+                          }}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg transition-all text-xs font-black uppercase tracking-wider cursor-pointer border border-emerald-150"
+                          title="Approvisionner (ajouter du stock) pour ce produit"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>+ Stock</span>
+                        </button>
+
+                        <button
                           onClick={() => openModal(product)}
-                          className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-transparent"
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => setProductToDelete(product)}
-                          className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-transparent"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -455,7 +618,7 @@ export default function Products() {
                       type="text"
                       placeholder="Pointez votre douchette et flashez, ou tapez ici..."
                       value={formData.barcode}
-                      onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
+                      onChange={(e) => setFormData({ ...formData, barcode: decodeAzertyBarcode(e.target.value) })}
                       className="w-full pl-11 pr-24 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white text-xs font-bold font-mono text-slate-800 placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all duration-300"
                     />
                     <div className="absolute inset-y-1.5 right-1.5 flex items-center gap-1">
@@ -551,13 +714,15 @@ export default function Products() {
                       const value = e.target.value.replace(',', '.');
                       if (value === '' || /^\d*\.?\d*$/.test(value)) {
                         setBuyPriceInput(value);
-                        setFormData({ ...formData, buyPrice: parseFloat(value) || 0 });
+                        const parsed = parseFloat(value) || 0;
+                        setFormData({ ...formData, buyPrice: Math.round(parsed * 1000) / 1000 });
                       }
                     }}
                     onBlur={() => {
                       const parsed = parseFloat(buyPriceInput) || 0;
-                      setBuyPriceInput(parsed.toString());
-                      setFormData({ ...formData, buyPrice: parsed });
+                      const rounded = Math.round(parsed * 1000) / 1000;
+                      setBuyPriceInput(rounded === 0 ? '' : rounded.toFixed(3));
+                      setFormData({ ...formData, buyPrice: rounded });
                     }}
                     placeholder="0.00"
                     className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
@@ -575,13 +740,15 @@ export default function Products() {
                       const value = e.target.value.replace(',', '.');
                       if (value === '' || /^\d*\.?\d*$/.test(value)) {
                         setSellPriceInput(value);
-                        setFormData({ ...formData, sellPrice: parseFloat(value) || 0 });
+                        const parsed = parseFloat(value) || 0;
+                        setFormData({ ...formData, sellPrice: Math.round(parsed * 1000) / 1000 });
                       }
                     }}
                     onBlur={() => {
                       const parsed = parseFloat(sellPriceInput) || 0;
-                      setSellPriceInput(parsed.toString());
-                      setFormData({ ...formData, sellPrice: parsed });
+                      const rounded = Math.round(parsed * 1000) / 1000;
+                      setSellPriceInput(rounded === 0 ? '' : rounded.toFixed(3));
+                      setFormData({ ...formData, sellPrice: rounded });
                     }}
                     placeholder="0.00"
                     className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
@@ -771,6 +938,93 @@ export default function Products() {
                 Supprimer
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Replenish Stock Modal */}
+      {replenishProduct && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-100 p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider">
+                Approvisionner : {replenishProduct.name}
+              </h3>
+              <button 
+                onClick={() => setReplenishProduct(null)}
+                className="p-1 text-gray-400 hover:text-gray-600 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <form onSubmit={handleReplenishSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-black uppercase tracking-wider text-slate-600 mb-1">
+                  Quantité à ajouter au stock
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  placeholder="Ex: 50"
+                  value={replenishQty}
+                  onChange={(e) => setReplenishQty(e.target.value)}
+                  className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-indigo-500 outline-none text-xs font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-black uppercase tracking-wider text-slate-600 mb-1">
+                  Prix d'achat unitaire ({storeSettings?.currency || 'DT'})
+                </label>
+                <input
+                  type="number"
+                  step="0.001"
+                  required
+                  min="0.001"
+                  placeholder="Ex: 2.500"
+                  value={replenishPrice}
+                  onChange={(e) => setReplenishPrice(e.target.value)}
+                  className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-indigo-500 outline-none text-xs font-bold font-mono"
+                />
+              </div>
+
+              {replenishQty && replenishPrice && (
+                <div className="p-3.5 bg-slate-50 border border-slate-100 rounded-xl space-y-1 my-2">
+                  <div className="flex justify-between text-xs text-slate-500 font-medium">
+                    <span>Quantité :</span>
+                    <span className="font-bold text-slate-700">{replenishQty}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-slate-500 font-medium">
+                    <span>Prix unitaire :</span>
+                    <span className="font-bold text-slate-700">{parseFloat(replenishPrice).toFixed(3)} {storeSettings?.currency || 'DT'}</span>
+                  </div>
+                  <div className="border-t border-slate-200/50 my-1.5 pt-1.5 flex justify-between text-xs font-bold text-slate-800">
+                    <span>Dépense totale estimée :</span>
+                    <span className="text-emerald-700 font-black">
+                      {(parseInt(replenishQty) * parseFloat(replenishPrice)).toFixed(3)} {storeSettings?.currency || 'DT'}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-3 justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={() => setReplenishProduct(null)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-650 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors cursor-pointer"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all shadow-md shadow-emerald-600/10 cursor-pointer active:scale-[0.98]"
+                >
+                  Confirmer
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

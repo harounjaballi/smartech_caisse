@@ -5,7 +5,7 @@ import { db } from '../firebase';
 import { Product, Client, SaleItem, Sale, Invoice, Category, StoreSettings } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
 import { Search, ShoppingCart, Trash2, Plus, Minus, User, CreditCard, CheckCircle, AlertCircle, Printer, X, FileText, Barcode, Filter, Tag } from 'lucide-react';
-import { cn } from '../lib/utils';
+import { cn, decodeAzertyBarcode } from '../lib/utils';
 import { format } from 'date-fns';
 import { PrintableTicket } from './PrintableTicket';
 
@@ -23,7 +23,7 @@ export default function POS() {
 
   useEffect(() => {
     if (!isPaidFocused) {
-      setPaidAmountInput(paidAmount === 0 ? '' : paidAmount.toString());
+      setPaidAmountInput(paidAmount === 0 ? '' : paidAmount.toFixed(3));
     }
   }, [paidAmount, isPaidFocused]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -164,7 +164,7 @@ export default function POS() {
           buffer += e.key;
         }
       } else if (e.key === 'Enter') {
-        const barcode = buffer.trim();
+        const barcode = decodeAzertyBarcode(buffer.trim());
         buffer = ''; // reset buffer
         lastKeyTime = 0;
 
@@ -208,19 +208,29 @@ export default function POS() {
   }, [scannerActive, products]);
 
   const filteredProducts = useMemo(() => 
-    products.filter(p => 
-      (p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-       (p.barcode && p.barcode.toLowerCase().includes(searchTerm.toLowerCase()))) && 
-      (selectedCategory === 'all' || p.category === selectedCategory) &&
-      p.stock > 0
-    ),
+    products.filter(p => {
+      const searchLower = searchTerm.toLowerCase();
+      const decodedSearch = decodeAzertyBarcode(searchTerm).toLowerCase();
+      
+      const matchesName = p.name.toLowerCase().includes(searchLower);
+      const matchesBarcode = p.barcode ? (
+        p.barcode.toLowerCase().includes(searchLower) || 
+        (decodedSearch && p.barcode.toLowerCase().includes(decodedSearch))
+      ) : false;
+      
+      return (matchesName || matchesBarcode) && 
+             (selectedCategory === 'all' || p.category === selectedCategory) &&
+             p.stock > 0;
+    }),
     [products, searchTerm, selectedCategory]
   );
 
   const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && searchTerm.trim() !== '') {
-      // Try to find exact barcode match
-      const product = products.find(p => p.barcode === searchTerm.trim() && p.stock > 0);
+      const trimmedSearch = searchTerm.trim();
+      const decodedSearch = decodeAzertyBarcode(trimmedSearch);
+      // Try to find exact barcode match (either original or decoded)
+      const product = products.find(p => (p.barcode === trimmedSearch || p.barcode === decodedSearch) && p.stock > 0);
       if (product) {
         addToCart(product);
         setSearchTerm('');
@@ -278,17 +288,20 @@ export default function POS() {
     setCart(prev => prev.filter(item => item.productId !== productId));
   };
 
-  const subtotal = useMemo(() => cart.reduce((sum, item) => sum + item.total, 0), [cart]);
+  const subtotal = useMemo(() => {
+    const rawSum = cart.reduce((sum, item) => sum + item.total, 0);
+    return Math.round(rawSum * 1000) / 1000;
+  }, [cart]);
   const currency = storeSettings?.currency || 'DT';
   const tvaRate = storeSettings?.tvaEnabled !== false ? (storeSettings?.tva || 19) / 100 : 0;
-  const tvaAmount = subtotal * tvaRate;
-  const cartTotal = subtotal + tvaAmount;
+  const tvaAmount = Math.round(subtotal * tvaRate * 1000) / 1000;
+  const cartTotal = Math.round((subtotal + tvaAmount) * 1000) / 1000;
 
   useEffect(() => {
     setPaidAmount(cartTotal);
-  }, [cartTotal]);
+  }, [selectedClient, cartTotal]);
 
-  const remainingDebt = Math.max(0, cartTotal - paidAmount);
+  const remainingDebt = Math.round(Math.max(0, cartTotal - paidAmount) * 1000) / 1000;
 
   const downloadPDF = async (invoice: Invoice) => {
     try {
@@ -318,6 +331,21 @@ export default function POS() {
     setIsProcessing(true);
     setError(null);
     console.log('Starting POS validation...', { cart, selectedClient, paidAmount });
+
+    // Règle de paiement selon le type de client
+    if (!selectedClient) {
+      if (Math.abs(paidAmount - cartTotal) > 0.001) {
+        setError(`Pour un client passagé, le montant payé doit être obligatoirement égal au montant total de la vente (${cartTotal.toFixed(3)} ${currency}).`);
+        setIsProcessing(false);
+        return;
+      }
+    } else {
+      if (paidAmount > cartTotal + 0.001) {
+        setError(`Le montant payé ne peut pas dépasser le montant total de la vente (${cartTotal.toFixed(3)} ${currency}).`);
+        setIsProcessing(false);
+        return;
+      }
+    }
 
     try {
       let generatedInvoice: Invoice | null = null;
@@ -590,20 +618,20 @@ export default function POS() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 pb-4 pr-2">
+        <div className="flex-1 overflow-y-auto grid grid-cols-2 gap-2.5 sm:gap-3 pb-4 pr-1 sm:pr-2">
           {filteredProducts.map((product) => (
             <button
               key={product.id}
               onClick={() => addToCart(product)}
               disabled={product.stock <= 0}
               className={cn(
-                "bg-white p-4 rounded-2xl border border-gray-100 shadow-sm hover:border-indigo-500 hover:shadow-md hover:shadow-indigo-50/50 transition-all text-left flex flex-col group relative",
+                "bg-white p-2.5 sm:p-4 rounded-xl sm:rounded-2xl border border-gray-100 shadow-sm hover:border-indigo-500 hover:shadow-md hover:shadow-indigo-50/50 transition-all text-left flex flex-col justify-between group relative overflow-hidden h-[135px] sm:h-[165px] min-w-0 w-full cursor-pointer",
                 product.stock <= 0 && "opacity-60 grayscale cursor-not-allowed"
               )}
             >
-              <div className="flex justify-between items-start mb-2">
+              <div className="w-full flex justify-between items-start gap-1 pb-1">
                 <span className={cn(
-                  "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                  "px-1 py-0.5 rounded-md text-[8px] sm:text-[10px] font-black uppercase tracking-wider truncate max-w-[55%]",
                   (() => {
                     const cat = categories.find(c => c.name === product.category);
                     if (!cat) return "bg-indigo-50 text-indigo-600";
@@ -615,27 +643,43 @@ export default function POS() {
                 )}>
                   {product.category}
                 </span>
-                <div className="flex flex-col items-end">
+                <div className="flex flex-col items-end text-right min-w-0">
                   <span className={cn(
-                    "text-[10px] font-medium",
+                    "text-[8px] sm:text-[10px] font-bold whitespace-nowrap",
                     product.stock <= 5 ? "text-red-500 font-bold" : "text-gray-400"
                   )}>
-                    Stock: {product.stock}
+                    Stk: {product.stock}
                   </span>
-                  {product.barcode && <span className="text-[9px] font-mono text-blue-500 bg-blue-50 px-1 rounded mt-0.5">{product.barcode}</span>}
+                  {product.barcode && (
+                    <span 
+                      title={product.barcode}
+                      className="text-[7px] sm:text-[9px] font-mono text-blue-500 bg-blue-50 px-1 rounded mt-0.5 truncate max-w-[50px] sm:max-w-[90px]"
+                    >
+                      {product.barcode}
+                    </span>
+                  )}
                 </div>
               </div>
-              <h3 className="font-bold text-gray-900 mb-1 line-clamp-2 group-hover:text-indigo-600">{product.name}</h3>
-              <div className="mt-auto pt-2 flex items-center justify-between">
-                <span className="text-lg font-black text-indigo-600">{product.sellPrice.toFixed(2)} <span className="text-xs">{currency}</span></span>
-                <div className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-gray-400 group-hover:bg-indigo-600 group-hover:text-white transition-all duration-200">
-                  <Plus className="w-5 h-5" />
+              <div className="flex-1 flex items-center py-1.5 min-w-0 w-full">
+                <h3 
+                  className="font-extrabold text-gray-900 text-[11px] sm:text-xs leading-tight sm:leading-snug break-words whitespace-normal overflow-hidden line-clamp-2 text-ellipsis group-hover:text-indigo-600 w-full"
+                  style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}
+                >
+                  {product.name}
+                </h3>
+              </div>
+              <div className="w-full pt-1.5 flex items-center justify-between mt-auto border-t border-gray-50">
+                <span className="text-xs sm:text-base font-black text-indigo-600 truncate mr-1">
+                  {product.sellPrice.toFixed(3)} <span className="text-[9px] sm:text-xs font-semibold">{currency}</span>
+                </span>
+                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-indigo-50 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-all duration-200 shrink-0 flex items-center justify-center shadow-2xs hover:scale-105 active:scale-95 cursor-pointer">
+                  <Plus className="w-4.5 h-4.5 sm:w-5 sm:h-5 font-black" />
                 </div>
               </div>
               {product.stock <= 0 && (
-                <div className="absolute inset-0 bg-white/40 backdrop-blur-[1px] rounded-2xl flex items-center justify-center">
-                  <div className="bg-red-600 text-white px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest shadow-lg">
-                    Rupture de Stock
+                <div className="absolute inset-0 bg-white/50 backdrop-blur-[1px] rounded-2xl flex items-center justify-center p-2 text-center">
+                  <div className="bg-red-600 text-white px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-wider shadow-lg">
+                    Rupture Stock
                   </div>
                 </div>
               )}
@@ -673,15 +717,15 @@ export default function POS() {
                   <div key={item.productId} className="flex items-center justify-between gap-3 p-3 bg-slate-50/40 hover:bg-slate-50 rounded-2xl border border-slate-100/50 transition-all duration-200">
                     <div className="flex-1 min-w-0">
                       <h4 className="font-extrabold text-xs text-slate-850 truncate" title={item.name}>{item.name}</h4>
-                      <p className="text-[10px] text-slate-450 font-bold mt-0.5">{item.price.toFixed(2)} {currency} / unité</p>
+                      <p className="text-[10px] text-slate-450 font-bold mt-0.5">{item.price.toFixed(3)} {currency} / unité</p>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       <button 
                         onClick={() => updateQuantity(item.productId, -1)}
                         disabled={item.quantity <= 1}
-                        className="w-7 h-7 rounded-lg bg-white border border-slate-150 flex items-center justify-center hover:border-indigo-300 hover:text-indigo-650 transition-colors disabled:opacity-30 disabled:cursor-not-allowed shadow-xs"
+                        className="w-8.5 h-8.5 rounded-xl sm:rounded-lg sm:w-7.5 sm:h-7.5 bg-white border border-slate-150 flex items-center justify-center hover:border-indigo-300 hover:text-indigo-650 transition-colors disabled:opacity-30 disabled:cursor-not-allowed shadow-xs"
                       >
-                        <Minus className="w-3.5 h-3.5" />
+                        <Minus className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
                       </button>
                       <span className="w-6 text-center font-bold text-xs text-slate-700">{item.quantity}</span>
                       <button 
@@ -690,13 +734,13 @@ export default function POS() {
                           const p = products.find(prod => prod.id === item.productId);
                           return p ? item.quantity >= p.stock : false;
                         })()}
-                        className="w-7 h-7 rounded-lg bg-white border border-slate-150 flex items-center justify-center hover:border-indigo-300 hover:text-indigo-650 transition-colors disabled:opacity-30 disabled:cursor-not-allowed shadow-xs"
+                        className="w-8.5 h-8.5 rounded-xl sm:rounded-lg sm:w-7.5 sm:h-7.5 bg-white border border-slate-150 flex items-center justify-center hover:border-indigo-300 hover:text-indigo-650 transition-colors disabled:opacity-30 disabled:cursor-not-allowed shadow-xs"
                       >
-                        <Plus className="w-3.5 h-3.5" />
+                        <Plus className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
                       </button>
                     </div>
                     <div className="text-right min-w-[75px] shrink-0">
-                      <div className="font-bold text-xs text-indigo-650 font-mono">{item.total.toFixed(2)} {currency}</div>
+                      <div className="font-bold text-xs text-indigo-650 font-mono">{item.total.toFixed(3)} {currency}</div>
                       <button 
                         onClick={() => removeFromCart(item.productId)}
                         className="text-[10px] font-bold text-rose-500 hover:text-rose-650 mt-1 inline-block hover:underline"
@@ -728,8 +772,12 @@ export default function POS() {
                   onChange={(e) => {
                     const client = clients.find(c => c.id === e.target.value);
                     setSelectedClient(client || null);
+                    if (!client) {
+                      setPaidAmount(cartTotal);
+                      setPaidAmountInput(cartTotal.toFixed(3));
+                    }
                   }}
-                  className="w-full px-3 py-2.5 bg-white border border-slate-100 rounded-xl text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 transition-shadow shadow-xs"
+                  className="w-full px-3.5 py-3.5 sm:py-2.5 bg-white border border-slate-200 rounded-xl text-sm sm:text-xs font-semibold text-slate-750 outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all shadow-xs"
                 >
                   <option value="">Client de passage</option>
                   {clients.map(c => (
@@ -738,69 +786,134 @@ export default function POS() {
                 </select>
               </div>
 
-              {/* Price Breakdown */}
-              <div className="space-y-2.5 pt-4 border-t border-slate-100">
-                {storeSettings?.tvaEnabled !== false && (
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="font-semibold text-slate-400">Sous-total</span>
-                    <span className="font-mono font-bold text-slate-600">{subtotal.toFixed(2)} {currency}</span>
+              {/* Price Breakdown & Premium Payment Cards */}
+              <div className="space-y-4 pt-4 border-t border-slate-100">
+                {/* CARD 1: TOTAL (Bleu foncé) */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-lg flex flex-col gap-1 text-white animate-in fade-in duration-200">
+                  <div className="flex items-center justify-between text-slate-300">
+                    <span className="text-[10px] font-black uppercase tracking-wider">Total à payer</span>
+                    <span className="text-[9px] font-bold bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-500/30">
+                      {storeSettings?.tvaEnabled !== false ? `TVA (${storeSettings?.tva || 19}%) incluse` : 'Sans TVA'}
+                    </span>
                   </div>
-                )}
-                {storeSettings?.tvaEnabled !== false && (
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="font-semibold text-slate-400">TVA ({storeSettings?.tva || 19}%)</span>
-                    <span className="font-mono font-bold text-slate-600">{tvaAmount.toFixed(2)} {currency}</span>
+                  <div className="flex justify-between items-baseline mt-2">
+                    <span className="text-2xl xs:text-[28px] sm:text-[32px] font-black font-mono tracking-tight leading-none text-indigo-200">
+                      {cartTotal.toFixed(3)}
+                    </span>
+                    <span className="text-xs sm:text-sm font-black text-indigo-300 ml-1.5 shrink-0">
+                      {currency}
+                    </span>
                   </div>
-                )}
-                <div className="flex justify-between items-center text-indigo-600 pt-3 border-t border-slate-100">
-                  <span className="text-xs font-black uppercase tracking-wider">Total</span>
-                  <span className="text-xl font-black font-mono">{cartTotal.toFixed(2)} {currency}</span>
+                  {storeSettings?.tvaEnabled !== false && (
+                    <div className="flex gap-4 mt-2 pt-2 border-t border-slate-850 text-[10px] text-slate-400 font-semibold font-mono">
+                      <div>Sous-total: {subtotal.toFixed(3)}</div>
+                      <div>TVA: {tvaAmount.toFixed(3)}</div>
+                    </div>
+                  )}
                 </div>
-              </div>
 
-              {/* Payment Section */}
-              <div className="space-y-2 pt-4 border-t border-slate-100">
-                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest block">Montant Payé ({currency})</label>
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                {/* CARD 2: MONTANT PAYÉ (Vert) */}
+                <div className="bg-emerald-50 border border-emerald-250 rounded-2xl p-4 sm:p-5 shadow-lg flex flex-col gap-2 animate-in fade-in duration-200">
+                  <div className="flex justify-between items-center text-emerald-800">
+                    <span className="text-[10px] font-black uppercase tracking-wider">Montant Payé</span>
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        setPaidAmount(cartTotal);
+                        setPaidAmountInput(cartTotal.toFixed(3));
+                      }}
+                      className="px-3.5 py-1.5 sm:px-2.5 sm:py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] sm:text-[9px] font-black uppercase tracking-wider rounded-lg transition-colors shadow-xs"
+                    >
+                      Tout payer
+                    </button>
+                  </div>
+                  <div className="relative flex items-center justify-between border-b border-emerald-200/60 pb-1">
+                    <CreditCard className="w-5 h-5 text-emerald-600 shrink-0 mr-2" />
                     <input
                       type="text"
                       inputMode="decimal"
                       value={paidAmountInput}
-                      onFocus={() => setIsPaidFocused(true)}
+                      onFocus={(e) => {
+                        setIsPaidFocused(true);
+                        e.currentTarget.select();
+                        try {
+                          e.currentTarget.setSelectionRange(0, e.currentTarget.value.length);
+                        } catch (err) {}
+                        setTimeout(() => {
+                          try {
+                            e.target.select();
+                            e.target.setSelectionRange(0, e.target.value.length);
+                          } catch (err) {}
+                        }, 50);
+                      }}
+                      onClick={(e) => {
+                        e.currentTarget.select();
+                        try {
+                          e.currentTarget.setSelectionRange(0, e.currentTarget.value.length);
+                        } catch (err) {}
+                      }}
                       onBlur={() => {
                         setIsPaidFocused(false);
                         const parsed = parseFloat(paidAmountInput) || 0;
-                        setPaidAmountInput(parsed === 0 ? '' : parsed.toString());
-                        setPaidAmount(parsed);
+                        const rounded = Math.round(parsed * 1000) / 1000;
+                        setPaidAmountInput(rounded === 0 ? '' : rounded.toFixed(3));
+                        setPaidAmount(rounded);
                       }}
                       onChange={(e) => {
                         const value = e.target.value.replace(',', '.');
                         if (value === '' || /^\d*\.?\d*$/.test(value)) {
                           setPaidAmountInput(value);
-                          setPaidAmount(parseFloat(value) || 0);
+                          const parsed = parseFloat(value) || 0;
+                          setPaidAmount(Math.round(parsed * 1050) / 1050);
                         }
                       }}
-                      placeholder="0.00"
-                      className="w-full pl-9 pr-3 py-2.5 bg-white border border-slate-100 rounded-xl text-xs outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 font-extrabold text-slate-800"
+                      placeholder="0.000"
+                      className="w-full bg-transparent text-right text-2xl xs:text-[28px] sm:text-[30px] font-black font-mono text-emerald-800 focus:outline-none outline-none border-none p-0 focus:ring-0 select-all"
                     />
+                    <span className="text-xs sm:text-sm font-black text-emerald-755 ml-1.5 shrink-0">{currency}</span>
                   </div>
-                  <button 
-                    onClick={() => setPaidAmount(cartTotal)}
-                    className="px-3 py-2.5 bg-indigo-55/70 hover:bg-indigo-65 text-indigo-600 border border-indigo-100 hover:text-indigo-700 text-[10px] font-extrabold uppercase rounded-xl transition-colors shadow-xs"
-                  >
-                    Total
-                  </button>
                 </div>
 
-                {remainingDebt > 0 && (
-                  <div className="p-3 bg-rose-50/50 border border-rose-100/60 rounded-xl flex items-center justify-between mt-1 animate-in fade-in duration-200">
-                    <div className="flex items-center gap-1.5 text-rose-700">
-                      <AlertCircle className="w-3.5 h-3.5" />
-                      <span className="text-[9px] font-black uppercase tracking-wider">Reste (Dette)</span>
+                {/* CARD 3: RESTE À PAYER (Rouge ou Orange) */}
+                <div className={cn(
+                  "p-4 sm:p-5 rounded-2xl shadow-lg border flex flex-col gap-1 transition-all duration-300 animate-in fade-in duration-200",
+                  remainingDebt > 0 
+                    ? "bg-rose-50 border-rose-200 text-rose-900 shadow-rose-100/40" 
+                    : "bg-amber-50 border-amber-200 text-amber-900 shadow-amber-100/20"
+                )}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 opacity-80">
+                      <AlertCircle className={cn(
+                        "w-4 h-4",
+                        remainingDebt > 0 ? "text-rose-600" : "text-amber-600"
+                      )} />
+                      <span className="text-[10px] font-black uppercase tracking-wider">Reste à payer</span>
                     </div>
-                    <span className="font-black text-xs text-rose-700 font-mono">{remainingDebt.toFixed(2)} {currency}</span>
+                    {remainingDebt > 0 ? (
+                      <span className="text-[9px] font-black uppercase tracking-wider px-2 py-0.5 bg-rose-200/50 text-rose-700 rounded-lg">
+                        Dette restante due
+                      </span>
+                    ) : (
+                      <span className="text-[9px] font-black uppercase tracking-wider px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-lg">
+                        Réglement complet
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex justify-between items-baseline mt-2">
+                    <span className="text-2xl xs:text-[28px] sm:text-[32px] font-black font-mono tracking-tight leading-none">
+                      {remainingDebt.toFixed(3)}
+                    </span>
+                    <span className="text-xs sm:text-sm font-black opacity-8 ml-1.5 shrink-0">
+                      {currency}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Warning de paiement pour client passager */}
+                {!selectedClient && Math.abs(paidAmount - cartTotal) > 0.001 && (
+                  <div className="text-[10px] text-rose-700 font-bold mt-1 bg-rose-50 border border-rose-100/60 rounded-xl p-3 flex items-center gap-1.5 animate-in fade-in duration-200">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+                    <span>Le paiement pour un client passager doit correspondre exactement au montant total ({cartTotal.toFixed(3)} {currency}).</span>
                   </div>
                 )}
 
@@ -817,7 +930,7 @@ export default function POS() {
               <button
                 onClick={validateSale}
                 disabled={cart.length === 0 || isProcessing}
-                className="w-full py-3.5 bg-indigo-600 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl hover:bg-indigo-75 active:scale-[0.98] transition-all shadow-lg shadow-indigo-600/15 disabled:opacity-40 disabled:scale-100 disabled:shadow-none flex items-center justify-center gap-2"
+                className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-sm uppercase tracking-wider rounded-xl active:scale-[0.98] transition-all shadow-lg shadow-indigo-600/15 disabled:opacity-40 disabled:scale-100 disabled:shadow-none flex items-center justify-center gap-2 cursor-pointer"
               >
                 {isProcessing ? 'Traitement...' : (
                   <>

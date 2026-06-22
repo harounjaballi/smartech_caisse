@@ -57,24 +57,24 @@ export const PrintableTicket = forwardRef<HTMLDivElement, Props>(({ invoice }, r
           <div key={index}>
             <div className="flex justify-between">
               <span className="max-w-[40mm] overflow-hidden text-ellipsis whitespace-nowrap">{item.name}</span>
-              <span>{item.quantity} x {item.price.toFixed(2)}</span>
+              <span>{item.quantity} x {item.price.toFixed(3)}</span>
             </div>
-            <div className="text-right">{item.total.toFixed(2)} {currency}</div>
+            <div className="text-right">{item.total.toFixed(3)} {currency}</div>
           </div>
         ))}
       </div>
       <div className="border-t border-dashed border-black my-1"></div>
       <div className="flex justify-between font-bold">
         <span>TOTAL</span>
-        <span>{invoice.total.toFixed(2)} {currency}</span>
+        <span>{invoice.total.toFixed(3)} {currency}</span>
       </div>
       <div className="flex justify-between">
         <span>Payé</span>
-        <span>{invoice.paid.toFixed(2)} {currency}</span>
+        <span>{invoice.paid.toFixed(3)} {currency}</span>
       </div>
       <div className="flex justify-between">
         <span>Reste</span>
-        <span>{invoice.debt.toFixed(2)} {currency}</span>
+        <span>{invoice.debt.toFixed(3)} {currency}</span>
       </div>
       <div className="border-t border-dashed border-black my-1"></div>
       <div className="text-center mt-5 text-[10px]">

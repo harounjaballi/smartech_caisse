@@ -67,6 +67,14 @@ service cloud.firestore {
              data.userId is string;
     }
 
+    function isValidSupply(data) {
+      return data.productId is string && data.productId.size() > 0 &&
+             data.productName is string && data.productName.size() > 0 &&
+             data.quantity is number &&
+             data.buyPrice is number && data.buyPrice >= 0 &&
+             data.totalCost is number;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -123,6 +131,12 @@ service cloud.firestore {
       allow read: if isAuthenticated() && isNotBanned();
       allow create, update: if isAuthenticated() && isNotBanned() && isValidNote(request.resource.data);
       allow delete: if isAuthenticated() && isNotBanned();
+    }
+
+    match /supplies/{supplyId} {
+      allow read: if isAuthenticated() && isNotBanned();
+      allow create, update: if isAuthenticated() && isNotBanned() && isValidSupply(request.resource.data);
+      allow delete: if isAdmin();
     }
   }
 }
