@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, orderBy } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, orderBy, setDoc, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Product, Category, StoreSettings } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
@@ -18,6 +18,8 @@ export default function Products() {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [scanStatus, setScanStatus] = useState<'idle' | 'scanned' | 'error'>('idle');
   const [scanMessage, setScanMessage] = useState('');
+  const [deletingCatId, setDeletingCatId] = useState<string | null>(null);
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
 
   const playBeep = (type: 'success' | 'error') => {
     try {
@@ -174,12 +176,26 @@ export default function Products() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Êtes-vous sûr de vouloir supprimer ce produit ?')) return;
+  const executeProductDelete = async () => {
+    if (!productToDelete) return;
     try {
-      await deleteDoc(doc(db, 'products', id));
+      await deleteDoc(doc(db, 'products', productToDelete.id));
+      setProductToDelete(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'products');
+    }
+  };
+
+  const executeCategoryDelete = async (categoryId: string, categoryName: string) => {
+    try {
+      await deleteDoc(doc(db, 'categories', categoryId));
+      if (formData.category === categoryName) {
+        const remaining = categories.filter(c => c.id !== categoryId);
+        setFormData(prev => ({ ...prev, category: remaining[0]?.name || '' }));
+      }
+      setDeletingCatId(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'categories');
     }
   };
 
@@ -225,18 +241,45 @@ export default function Products() {
     e.preventDefault();
     if (!newCategoryName.trim()) return;
     
+    const exists = categories.some(c => c.name.toLowerCase() === newCategoryName.trim().toLowerCase());
+    if (exists) {
+      alert('Cette catégorie existe déjà.');
+      return;
+    }
+    
     try {
-      const docRef = await addDoc(collection(db, 'categories'), {
+      await addDoc(collection(db, 'categories'), {
         name: newCategoryName.trim(),
-        type: 'produit'
+        type: 'autre'
       });
       setFormData(prev => ({ ...prev, category: newCategoryName.trim() }));
       setNewCategoryName('');
-      setIsQuickCategoryModalOpen(false);
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'categories');
     }
   };
+
+  const handleResetDefaultCategories = async () => {
+    if (!confirm('Voulez-vous restaurer les catégories de base par défaut ?')) return;
+    const defaults = [
+      { id: 'cat_alimentation', name: 'Alimentation' },
+      { id: 'cat_boissons', name: 'Boissons' },
+      { id: 'cat_entretien', name: 'Entretien' },
+      { id: 'cat_produits_frais', name: 'Produits Frais' }
+    ];
+    for (const cat of defaults) {
+      try {
+        await setDoc(doc(db, 'categories', cat.id), {
+          name: cat.name,
+          type: 'autre'
+        });
+      } catch (err) {
+        console.error('Error seeding category:', cat.name, err);
+      }
+    }
+  };
+
+
 
   const filteredProducts = products.filter(p => 
     p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -251,13 +294,15 @@ export default function Products() {
           <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">Produits</h1>
           <p className="text-xs text-slate-400 font-medium uppercase tracking-wider mt-0.5">Gérez votre inventaire de produits et articles de supérette</p>
         </div>
-        <button
-          onClick={() => openModal()}
-          className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all duration-300 shadow-lg shadow-indigo-600/15 group hover:-translate-y-0.5"
-        >
-          <Plus className="w-4 h-4 transition-transform group-hover:rotate-90 duration-300" />
-          Nouveau Produit
-        </button>
+        <div className="flex gap-2.5">
+          <button
+            onClick={() => openModal()}
+            className="inline-flex items-center justify-center gap-2 px-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all duration-300 shadow-lg shadow-indigo-600/15 group hover:-translate-y-0.5 cursor-pointer"
+          >
+            <Plus className="w-4 h-4 transition-transform group-hover:rotate-90 duration-300" />
+            Nouveau Produit
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-3xl border border-slate-100 shadow-xs overflow-hidden premium-shadow">
@@ -350,7 +395,7 @@ export default function Products() {
                           <Edit2 className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => handleDelete(product.id)}
+                          onClick={() => setProductToDelete(product)}
                           className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -441,31 +486,30 @@ export default function Products() {
                   </p>
                 </div>
 
-                <div>
+                <div className="col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Catégorie</label>
                   <div className="flex gap-2">
                     <select
                       value={formData.category}
                       onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                      className="flex-1 px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                      className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none text-slate-800 bg-white"
+                      required
                     >
                       {categories.length === 0 ? (
-                        <>
-                          <option value="Alimentation">Alimentation</option>
-                          <option value="Boissons">Boissons</option>
-                          <option value="Entretien">Entretien</option>
-                          <option value="Produits Frais">Produits Frais</option>
-                        </>
+                        <option value="">⚠️ Veuillez créer une catégorie</option>
                       ) : (
-                        categories.map(cat => (
-                          <option key={cat.id} value={cat.name}>{cat.name}</option>
-                        ))
+                        <>
+                          <option value="">-- Choisir une catégorie --</option>
+                          {categories.map(cat => (
+                            <option key={cat.id} value={cat.name}>{cat.name}</option>
+                          ))}
+                        </>
                       )}
                     </select>
                     <button
                       type="button"
                       onClick={() => setIsQuickCategoryModalOpen(true)}
-                      className="p-2 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-100 transition-colors"
+                      className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-100 transition-colors cursor-pointer"
                       title="Ajouter une catégorie"
                     >
                       <Plus className="w-5 h-5" />
@@ -481,6 +525,17 @@ export default function Products() {
                     min="0"
                     value={formData.stock}
                     onChange={(e) => setFormData({ ...formData, stock: parseInt(e.target.value) })}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Alerte Stock Faible</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={formData.lowStockAlert}
+                    onChange={(e) => setFormData({ ...formData, lowStockAlert: parseInt(e.target.value) })}
                     className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
                   />
                 </div>
@@ -533,18 +588,7 @@ export default function Products() {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Alerte Stock Faible</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={formData.lowStockAlert}
-                    onChange={(e) => setFormData({ ...formData, lowStockAlert: parseInt(e.target.value) })}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
-                  />
-                </div>
-
-                <div>
+                <div className="col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Date Expiration</label>
                   <input
                     type="date"
@@ -576,43 +620,157 @@ export default function Products() {
       )}
       {/* Quick Category Modal */}
       {isQuickCategoryModalOpen && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-gray-100">
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
-              <h2 className="text-lg font-bold text-gray-900">Nouvelle Catégorie</h2>
-              <button onClick={() => setIsQuickCategoryModalOpen(false)} className="p-2 text-gray-400 hover:text-gray-650 rounded-lg">
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-100 flex flex-col">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <h2 className="text-base font-black text-slate-800 uppercase tracking-wide flex items-center gap-2">
+                <Tag className="w-4 h-4 text-indigo-500 animate-pulse" />
+                Gérer les Catégories
+              </h2>
+              <button onClick={() => setIsQuickCategoryModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <form onSubmit={handleQuickCategoryAdd} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Nom de la catégorie</label>
-                <input
-                  type="text"
-                  autoFocus
-                  required
-                  value={newCategoryName}
-                  onChange={(e) => setNewCategoryName(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
-                  placeholder="Ex: Boissons..."
-                />
+            
+            <div className="p-5 space-y-5">
+              {/* Add form */}
+              <form onSubmit={handleQuickCategoryAdd} className="space-y-2">
+                <label className="block text-xs font-black uppercase tracking-wider text-slate-600">Nouveau nom de catégorie</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    autoFocus
+                    required
+                    value={newCategoryName}
+                    onChange={(e) => setNewCategoryName(e.target.value)}
+                    className="flex-1 px-3.5 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none text-xs font-semibold placeholder:text-slate-400 bg-slate-50 focus:bg-white transition-all text-slate-900"
+                    placeholder="Ex: Boissons, Fruits..."
+                  />
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all shadow-md shadow-indigo-600/10 cursor-pointer flex items-center gap-1"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Ajouter
+                  </button>
+                </div>
+              </form>
+
+              {/* List of existing categories */}
+              <div className="space-y-2.5">
+                <span className="block text-xs font-black uppercase tracking-wider text-slate-600 border-b border-slate-100 pb-1.5 mb-1">
+                  Catégories existantes ({categories.length})
+                </span>
+                
+                <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                  {categories.length === 0 ? (
+                    <p className="text-center py-6 text-slate-400 text-xs font-medium">Aucune catégorie enregistrée.</p>
+                  ) : (
+                    categories.map((cat) => (
+                      <div key={cat.id} className="flex items-center justify-between px-3 py-2 bg-slate-50 hover:bg-slate-100/50 border border-slate-100 rounded-xl transition-all group">
+                        {deletingCatId === cat.id ? (
+                          <div className="flex items-center justify-between w-full animate-in fade-in slide-in-from-right-1 duration-150">
+                            <span className="text-[11px] font-black text-red-600 uppercase tracking-wider flex items-center gap-1">
+                              <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
+                              Supprimer?
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setDeletingCatId(null)}
+                                className="px-2 py-1 text-[10px] font-bold text-slate-500 hover:text-slate-700 bg-slate-200 rounded-lg transition-colors cursor-pointer"
+                              >
+                                Non
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => executeCategoryDelete(cat.id, cat.name)}
+                                className="px-2.5 py-1 text-[10px] font-black text-white bg-red-600 hover:bg-red-700 rounded-lg transition-all cursor-pointer"
+                              >
+                                Oui
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <span className="text-xs font-bold text-slate-700 flex items-center gap-2">
+                              <Tag className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-500 transition-colors" />
+                              {cat.name}
+                            </span>
+                            
+                            <button
+                              type="button"
+                              onClick={() => setDeletingCatId(cat.id)}
+                              className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                              title={`Supprimer la catégorie ${cat.name}`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => setIsQuickCategoryModalOpen(false)}
-                  className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 font-semibold rounded-xl hover:bg-gray-200 transition-colors"
-                >
-                  Annuler
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 px-4 py-2 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-600/15"
-                >
-                  Ajouter
-                </button>
+            </div>
+
+            <div className="px-6 py-3 border-t border-slate-50 bg-slate-50/50 flex justify-between items-center">
+              <button
+                type="button"
+                onClick={handleResetDefaultCategories}
+                className="text-slate-500 hover:text-indigo-600 text-[10px] font-black uppercase tracking-wider underline cursor-pointer"
+                title="Restaurer les catégories de base par défaut"
+              >
+                Réinit. défauts
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDeletingCatId(null);
+                  setIsQuickCategoryModalOpen(false);
+                }}
+                className="px-5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-black uppercase tracking-wider rounded-xl transition-colors cursor-pointer"
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Product Delete Confirmation Modal */}
+      {productToDelete && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-slate-100 p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2 bg-red-50 text-red-600 rounded-xl">
+                <AlertTriangle className="w-6 h-6 animate-pulse" />
               </div>
-            </form>
+              <div className="space-y-1">
+                <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider">Supprimer le produit ?</h3>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Êtes-vous sûr de vouloir supprimer définitivement le produit <strong className="text-slate-800">"{productToDelete.name}"</strong> ? Cette action est irréversible.
+                </p>
+              </div>
+            </div>
+            
+            <div className="flex gap-3 justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setProductToDelete(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={executeProductDelete}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-colors shadow-md shadow-red-600/10 cursor-pointer"
+              >
+                Supprimer
+              </button>
+            </div>
           </div>
         </div>
       )}
