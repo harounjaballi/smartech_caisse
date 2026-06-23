@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, doc, setDoc, updateDoc, deleteDoc, where, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { initializeApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateEmail, updatePassword, deleteUser } from 'firebase/auth';
@@ -8,6 +8,7 @@ import { UserProfile } from '../types';
 import { 
   Users as UsersIcon, 
   UserPlus, 
+  User,
   X, 
   Shield, 
   Ban, 
@@ -37,7 +38,11 @@ const MENU_OPTIONS = [
   { id: 'users', name: 'Gestion des Utilisateurs', description: 'Accès restreint pour gérer l\'équipe' },
 ];
 
-export default function Users() {
+interface UsersProps {
+  userProfile: UserProfile | null;
+}
+
+export default function Users({ userProfile }: UsersProps) {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -45,12 +50,15 @@ export default function Users() {
   const [errorOnCreate, setErrorOnCreate] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
+  const ownerId = userProfile?.ownerId || (userProfile?.role === 'admin' ? userProfile.uid : 'admin_fallback');
+
   // Password visibility state for each user in the table: key is user uid
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
   // Copied indicator state to show temporary checkmark
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // Form states - Create
+  const [nameInput, setNameInput] = useState('');
   const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [roleInput, setRoleInput] = useState<'admin' | 'user'>('user');
@@ -58,6 +66,7 @@ export default function Users() {
 
   // Unified editing state
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
+  const [editName, setEditName] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editPassword, setEditPassword] = useState('');
   const [editRole, setEditRole] = useState<'admin' | 'user'>('user');
@@ -66,7 +75,7 @@ export default function Users() {
   const [errorOnEdit, setErrorOnEdit] = useState<string | null>(null);
 
   useEffect(() => {
-    const q = query(collection(db, 'users'));
+    const q = query(collection(db, 'users'), where('ownerId', '==', ownerId));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const uList = snapshot.docs.map(doc => ({ ...doc.data() } as UserProfile));
       setUsers(uList);
@@ -77,7 +86,7 @@ export default function Users() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [ownerId]);
 
   const handleRoleChangeOnCreate = (role: 'admin' | 'user') => {
     setRoleInput(role);
@@ -111,53 +120,93 @@ export default function Users() {
     setErrorOnCreate(null);
     setActionLoading('creating');
 
-    if (passwordInput.length < 6) {
-      setErrorOnCreate('Le mot de passe doit contenir au moins 6 caractères.');
+    console.log("=== DÉBUT DE LA CRÉATION DE L'UTILISATEUR ===");
+    console.log("Nom complet saisi:", nameInput);
+    console.log("Email saisi:", emailInput);
+    console.log("Rôle sélectionné:", roleInput);
+    console.log("Privilèges d'accès:", selectedMenus);
+
+    // 1. Validation rigoureuse des données d'entrée
+    if (!nameInput || nameInput.trim().length < 2) {
+      console.warn("Échec validation: le nom est absent ou trop court (< 2 caractères)");
+      setErrorOnCreate("Le nom de l'utilisateur est obligatoire (min 2 caractères).");
+      setActionLoading(null);
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const cleanEmail = emailInput.trim().toLowerCase();
+    if (!cleanEmail || !emailRegex.test(cleanEmail)) {
+      console.warn("Échec validation: format email incorrect");
+      setErrorOnCreate("Veuillez saisir une adresse email valide.");
+      setActionLoading(null);
+      return;
+    }
+
+    if (!passwordInput || passwordInput.length < 6) {
+      console.warn("Échec validation: mot de passe absent ou inférieur à 6 caractères");
+      setErrorOnCreate("Le mot de passe obligatoire doit contenir au moins 6 caractères.");
       setActionLoading(null);
       return;
     }
 
     if (selectedMenus.length === 0) {
-      setErrorOnCreate('Veuillez sélectionner au moins un privilège d\'accès.');
+      console.warn("Échec validation: aucun menu sélectionné");
+      setErrorOnCreate("Veuillez sélectionner au moins un privilège d'accès.");
+      setActionLoading(null);
+      return;
+    }
+
+    // 2. Vérification d'existence de l'utilisateur dans Firestore pour éviter les doublons
+    try {
+      console.log("Vérification en base des inscrits existants pour l'email:", cleanEmail);
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('email', '==', cleanEmail));
+      const querySnapshot = await getDocs(q);
+
+      if (!querySnapshot.empty) {
+        console.warn(`Un utilisateur possède déjà l'adresse email ${cleanEmail} dans Firestore.`);
+        setErrorOnCreate("Cette adresse email est déjà en cours d'utilisation.");
+        setActionLoading(null);
+        return;
+      }
+      console.log("Aucun doublon d'email détecté dans Firestore.");
+    } catch (fsErr: any) {
+      console.error("Erreur d'accès à la base de données lors de la vérification:", fsErr);
+      setErrorOnCreate(`Erreur de connexion lors de la vérification de l'utilisateur: ${fsErr.message}`);
       setActionLoading(null);
       return;
     }
 
     const tempAppName = 'TempUserCreation_' + Date.now();
     let tempApp: any = null;
+    let targetUid = '';
+
+    // 3. Tenter l'ajout de l'utilisateur dans Firebase Auth via l'application temporaire
     try {
+      console.log("Tentative d'enregistrement dans Firebase Auth via instance temporaire...");
       tempApp = initializeApp(firebaseConfig, tempAppName);
       const tempAuth = getAuth(tempApp);
 
-      // 1. Create the user in Firebase Auth under the user's project
-      const userCred = await createUserWithEmailAndPassword(tempAuth, emailInput, passwordInput);
-      const targetUid = userCred.user.uid;
+      const userCred = await createUserWithEmailAndPassword(tempAuth, cleanEmail, passwordInput);
+      targetUid = userCred.user.uid;
+      console.log(`Utilisateur créé avec succès dans Firebase Authentication. UID: ${targetUid}`);
 
-      // 2. Create the document in Firestore using the logged-in admin's handle
-      await setDoc(doc(db, "users", targetUid), {
-        uid: targetUid,
-        email: emailInput,
-        password: passwordInput,
-        role: roleInput,
-        status: 'active',
-        allowedMenus: selectedMenus
-      });
-
-      // 3. Log out of transient app
       await tempAuth.signOut();
-
-      setSuccess('Utilisateur créé avec succès ! Identifiants enregistrés dans le système.');
-      setIsModalOpen(false);
-      setEmailInput('');
-      setPasswordInput('');
-      setRoleInput('user');
-      setSelectedMenus(['dashboard', 'pos', 'products', 'clients', 'sales', 'invoices']);
-
-      setTimeout(() => setSuccess(null), 4000);
-    } catch (err: any) {
-      console.error(err);
-      setErrorOnCreate(err.message || 'Une erreur est survenue.');
-    } finally {
+    } catch (authErr: any) {
+      console.error("L'inscription via Firebase Auth standard a échoué :", authErr);
+      let errorMsg = "La création du compte d'authentification a échoué.";
+      if (authErr.code === 'auth/email-already-in-use') {
+        errorMsg = "Cette adresse email est déjà utilisée dans Firebase Authentication.";
+      } else if (authErr.code === 'auth/weak-password') {
+        errorMsg = "Le mot de passe choisi doit contenir au moins 6 caractères.";
+      } else if (authErr.code === 'auth/invalid-email') {
+        errorMsg = "L'adresse email saisie est invalide pour Firebase Authentication.";
+      } else if (authErr.message) {
+        errorMsg += ` Détails : ${authErr.message}`;
+      }
+      setErrorOnCreate(errorMsg);
+      setActionLoading(null);
       if (tempApp) {
         try {
           await tempApp.delete();
@@ -165,12 +214,53 @@ export default function Users() {
           console.error(delErr);
         }
       }
+      return;
+    }
+
+    // 4. Création de la fiche d'utilisateur dans Firestore
+    try {
+      console.log(`Création du document Firestore pour users/${targetUid}...`);
+      await setDoc(doc(db, "users", targetUid), {
+        uid: targetUid,
+        name: nameInput.trim(),
+        email: cleanEmail,
+        password: passwordInput,
+        role: roleInput,
+        status: 'active',
+        allowedMenus: selectedMenus,
+        ownerId: ownerId
+      });
+      console.log("Création et sauvegarde Firestore terminées!");
+
+      setSuccess('Utilisateur créé avec succès et informations prêtes pour la connexion.');
+      setIsModalOpen(false);
+      setNameInput('');
+      setEmailInput('');
+      setPasswordInput('');
+      setRoleInput('user');
+      setSelectedMenus(['dashboard', 'pos', 'products', 'clients', 'sales', 'invoices']);
+
+      setTimeout(() => setSuccess(null), 4000);
+    } catch (err: any) {
+      console.error("Erreur critique lors de l'enregistrement de l'utilisateur dans Firestore:", err);
+      setErrorOnCreate(`Impossible d'enregistrer l'utilisateur en base: ${err.message || 'Permission refusée'}`);
+    } finally {
+      if (tempApp) {
+        try {
+          console.log("Destruction de l'application temporaire Firebase...");
+          await tempApp.delete();
+        } catch (delErr) {
+          console.error("Erreur d'effacement du tempApp:", delErr);
+        }
+      }
       setActionLoading(null);
+      console.log("=== FIN DE LA CRÉATION DE L'UTILISATEUR ===");
     }
   };
 
   const handleOpenEdit = (user: UserProfile) => {
     setEditingUser(user);
+    setEditName(user.name || '');
     setEditEmail(user.email || '');
     setEditPassword(user.password || '');
     setEditRole(user.role || 'user');
@@ -189,6 +279,26 @@ export default function Users() {
     setErrorOnEdit(null);
     setActionLoading('editing');
 
+    console.log("=== DÉBUT DE LA MODIFICATION DE L'UTILISATEUR ===");
+    console.log("UID:", editingUser.uid);
+    console.log("Email d'origine:", editingUser.email);
+    console.log("Nouveau Nom saisi:", editName);
+    console.log("Nouvel Email saisi:", editEmail);
+
+    if (!editName || editName.trim().length < 2) {
+      setErrorOnEdit("Le nom est obligatoire (min 2 caractères).");
+      setActionLoading(null);
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const cleanEmail = editEmail.trim().toLowerCase();
+    if (!cleanEmail || !emailRegex.test(cleanEmail)) {
+      setErrorOnEdit("Veuillez saisir une adresse email valide.");
+      setActionLoading(null);
+      return;
+    }
+
     if (editPassword.length < 6) {
       setErrorOnEdit('Le mot de passe doit contenir au moins 6 caractères.');
       setActionLoading(null);
@@ -203,54 +313,101 @@ export default function Users() {
 
     const tempAppName = 'TempUserUpdate_' + Date.now();
     let tempApp: any = null;
-    try {
-      const emailChanged = editEmail !== editingUser.email;
-      const passwordChanged = editPassword !== editingUser.password;
+    let targetUid = editingUser.uid;
+    let isMigration = false;
 
-      // If email or password changed, update Firebase Auth using secondary credentials login
-      if (emailChanged || passwordChanged) {
+    try {
+      const emailChanged = cleanEmail !== editingUser.email;
+      const passwordChanged = editPassword !== editingUser.password;
+      const isFallbackUser = editingUser.uid.startsWith('user_');
+
+      if (isFallbackUser) {
+        console.log("Utilisateur local détecté. Migration en cours vers un compte Firebase Auth standard...");
+        tempApp = initializeApp(firebaseConfig, tempAppName);
+        const tempAuth = getAuth(tempApp);
+        try {
+          const userCred = await createUserWithEmailAndPassword(tempAuth, cleanEmail, editPassword);
+          targetUid = userCred.user.uid;
+          isMigration = true;
+          console.log(`Compte Firebase Auth créé pendant la migration. Nouveau UID: ${targetUid}`);
+          await tempAuth.signOut();
+        } catch (migrationErr: any) {
+          console.error("Erreur de création de compte lors de la migration :", migrationErr);
+          throw new Error(`La création du compte d'authentification a échoué : ${migrationErr.message || migrationErr}`);
+        }
+      } else if (emailChanged || passwordChanged) {
+        console.log("Mise à jour des identifiants Firebase Auth...");
         tempApp = initializeApp(firebaseConfig, tempAppName);
         const tempAuth = getAuth(tempApp);
 
         const oldEmail = editingUser.email || '';
         const oldPassword = editingUser.password || '';
-        const userCred = await signInWithEmailAndPassword(tempAuth, oldEmail, oldPassword);
+        try {
+          const userCred = await signInWithEmailAndPassword(tempAuth, oldEmail, oldPassword);
 
-        if (emailChanged) {
-          await updateEmail(userCred.user, editEmail);
-        }
-        if (passwordChanged) {
-          await updatePassword(userCred.user, editPassword);
-        }
+          if (emailChanged) {
+            console.log("Mise à jour de l'email auth...");
+            await updateEmail(userCred.user, cleanEmail);
+          }
+          if (passwordChanged) {
+            console.log("Mise à jour du mot de passe auth...");
+            await updatePassword(userCred.user, editPassword);
+          }
 
-        await tempAuth.signOut();
+          await tempAuth.signOut();
+        } catch (authUpdateErr: any) {
+          console.error("La mise à jour de l'authentification Firebase standard a échoué :", authUpdateErr);
+          throw new Error(`Échec de mise à jour dans Firebase Authentication : ${authUpdateErr.message || authUpdateErr}`);
+        }
       }
 
-      // Update in Firestore using the logged-in admin's handles
-      const userRef = doc(db, "users", editingUser.uid);
-      await updateDoc(userRef, {
-        email: editEmail,
-        password: editPassword,
-        role: editRole,
-        status: editStatus,
-        allowedMenus: editSelectedMenus
-      });
+      // Enregistrement final des données
+      if (isMigration) {
+        console.log(`Migration Firestore : création du nouveau profil à users/${targetUid}`);
+        await setDoc(doc(db, "users", targetUid), {
+          uid: targetUid,
+          name: editName.trim(),
+          email: cleanEmail,
+          password: editPassword,
+          role: editRole,
+          status: editStatus,
+          allowedMenus: editSelectedMenus,
+          ownerId: ownerId
+        });
 
-      setSuccess(`Utilisateur ${editEmail} mis à jour avec succès.`);
+        console.log(`Migration Firestore : suppression de l'ancien profil users/${editingUser.uid}`);
+        await deleteDoc(doc(db, "users", editingUser.uid));
+      } else {
+        console.log(`Mise à jour standard Firestore pour users/${targetUid}`);
+        const userRef = doc(db, "users", targetUid);
+        await updateDoc(userRef, {
+          name: editName.trim(),
+          email: cleanEmail,
+          password: editPassword,
+          role: editRole,
+          status: editStatus,
+          allowedMenus: editSelectedMenus
+        });
+      }
+
+      console.log("Sauvegarde Firestore de la mise à jour réussie!");
+      setSuccess(`Utilisateur ${cleanEmail} mis à jour avec succès.`);
       setEditingUser(null);
       setTimeout(() => setSuccess(null), 4000);
     } catch (err: any) {
-      console.error(err);
+      console.error("Erreur critique d'écriture lors de la modification de l'utilisateur:", err);
       setErrorOnEdit(err.message || 'Une erreur est survenue lors de la modification.');
     } finally {
       if (tempApp) {
         try {
+          console.log("Destruction de l'application temporaire Firebase de mise à jour...");
           await tempApp.delete();
         } catch (delErr) {
-          console.error(delErr);
+          console.error("Nettoyage tempApp échoué:", delErr);
         }
       }
       setActionLoading(null);
+      console.log("=== FIN DE LA MODIFICATION DE L'UTILISATEUR ===");
     }
   };
 
@@ -394,12 +551,13 @@ export default function Users() {
                             "w-10 h-10 rounded-2xl bg-indigo-50 flex items-center justify-center font-black text-xs border border-indigo-100/50",
                             profile.role === 'admin' ? "text-purple-600 bg-purple-50/70 border-purple-100" : "text-indigo-600"
                           )}>
-                            {profile.email ? profile.email[0].toUpperCase() : '?'}
+                            {profile.name ? profile.name[0].toUpperCase() : (profile.email ? profile.email[0].toUpperCase() : '?')}
                           </div>
                           <div>
                             <div className="font-bold text-xs text-slate-800 flex items-center gap-1.5 leading-none">
-                              {profile.email}
+                              {profile.name || 'Sans Nom'}
                             </div>
+                            <span className="text-[10px] font-medium text-slate-500 mt-1 block">{profile.email}</span>
                             <span className="text-[9px] text-slate-400 font-mono mt-1 block">ID: {profile.uid.substring(0, 10)}...</span>
                           </div>
                         </div>
@@ -576,6 +734,22 @@ export default function Users() {
                 </div>
               )}
 
+              {/* Nom complet */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Nom complet</label>
+                <div className="relative">
+                  <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input
+                    type="text"
+                    required
+                    value={nameInput}
+                    onChange={(e) => setNameInput(e.target.value)}
+                    placeholder="Ex: Jean Dupont"
+                    className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 transition-shadow"
+                  />
+                </div>
+              </div>
+
               {/* Email */}
               <div className="space-y-1.5">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Adresse Email de connexion</label>
@@ -715,6 +889,22 @@ export default function Users() {
                   {errorOnEdit}
                 </div>
               )}
+
+              {/* Nom complet */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block font-bold">Nom complet</label>
+                <div className="relative">
+                  <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input
+                    type="text"
+                    required
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    placeholder="Ex: Jean Dupont"
+                    className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 transition-shadow"
+                  />
+                </div>
+              </div>
 
               {/* Email */}
               <div className="space-y-1.5">

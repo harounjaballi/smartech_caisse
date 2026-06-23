@@ -2,7 +2,7 @@ import React, { useEffect, useState, Component } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { auth, db } from './firebase';
-import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot, collection, query, orderBy, where } from 'firebase/firestore';
 import { 
   LayoutDashboard, 
   Package, 
@@ -248,7 +248,8 @@ function Sidebar({ isOpen, setIsOpen, userProfile, todayNotesCount }: { isOpen: 
           <div className="p-4 border-t border-slate-100 bg-slate-50/50">
             <button
               onClick={async () => {
-                localStorage.removeItem('custom_session');
+                localStorage.clear();
+                sessionStorage.clear();
                 await signOut(auth);
                 window.location.reload();
               }}
@@ -278,19 +279,35 @@ export default function App() {
     return raw.charAt(0).toUpperCase() + raw.slice(1);
   };
 
+  // Print log outputs for connected UID and Email for verification audit
+  useEffect(() => {
+    if (userProfile) {
+      console.log(`[VERIFICATION SECURISE] Utilisateur Connecté - UID: ${userProfile.uid}, Email: ${userProfile.email}, Rôle: ${userProfile.role}, OwnerId: ${userProfile.ownerId}`);
+    } else if (user) {
+      console.log(`[VERIFICATION SECURISE] Utilisateur Firebase Loggé mais profil absent - UID: ${user.uid}, Email: ${user.email}`);
+    }
+  }, [user, userProfile]);
+
   // Listen to today's notes
   useEffect(() => {
-    if (!user) {
+    if (!user || !userProfile) {
       setTodayNotes([]);
       return;
     }
+    const ownerId = userProfile?.ownerId || (userProfile?.role === 'admin' ? userProfile.uid : 'admin_fallback');
     const todayStr = new Date().toISOString().split('T')[0];
-    const q = query(collection(db, 'notes'), orderBy('date', 'desc'));
+    
+    // Listen for notes of this owner, sort client-side to avoid compound index requirements
+    const q = query(collection(db, 'notes'), where('ownerId', '==', ownerId));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const parsedNotes = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       } as Note));
+      
+      // Sort desc client-side
+      parsedNotes.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+      
       // Only keep notes that match today's date
       const todays = parsedNotes.filter(n => n.date === todayStr);
       setTodayNotes(todays);
@@ -301,99 +318,126 @@ export default function App() {
     return () => {
       unsubscribe();
     };
-  }, [user]);
+  }, [user, userProfile]);
 
   useEffect(() => {
     let unsubscribeProfile: (() => void) | null = null;
+    let isMounted = true;
 
-    // Check custom local session first
+    // Load custom local session first (if exists) to avoid initial screen flicker
     const storedSession = localStorage.getItem('custom_session');
+    let initialProfile: UserProfile | null = null;
     if (storedSession) {
       try {
-        const profile = JSON.parse(storedSession);
-        setUser({ uid: profile.uid, email: profile.email } as any);
-        setUserProfile(profile);
+        initialProfile = JSON.parse(storedSession);
+        setUser({ uid: initialProfile.uid, email: initialProfile.email } as any);
+        setUserProfile(initialProfile);
         setLoading(false);
-
-        // Listen real-time to this custom user's profile document for ban or privileges changes
-        const userRef = doc(db, 'users', profile.uid);
-        unsubscribeProfile = onSnapshot(userRef, (snap) => {
-          if (snap.exists()) {
-            const profileData = snap.data() as UserProfile;
-            if (profileData.status === 'banned') {
-              if (unsubscribeProfile) {
-                unsubscribeProfile();
-                unsubscribeProfile = null;
-              }
-              localStorage.removeItem('custom_session');
-              setUser(null);
-              setUserProfile(null);
-              alert('Votre compte a été banni. Veuillez contacter l\'administrateur.');
-              window.location.reload();
-            } else {
-              setUserProfile(profileData);
-              localStorage.setItem('custom_session', JSON.stringify(profileData));
-            }
-          }
-        });
-
-        return () => {
-          if (unsubscribeProfile) unsubscribeProfile();
-        };
+        console.log("[AUTH RE-HYDRATE] Restored fallback custom session:", initialProfile.uid, initialProfile.email);
       } catch (err) {
-        console.error("Error restoration custom session", err);
+        console.error("Error restoring custom session:", err);
       }
     }
 
-    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        // Ensure user profile exists
-        const userRef = doc(db, 'users', user.uid);
+    const startProfileListener = (uid: string, isFirebaseUser: boolean) => {
+      if (unsubscribeProfile) {
+        unsubscribeProfile();
+        unsubscribeProfile = null;
+      }
+      const userRef = doc(db, 'users', uid);
+      unsubscribeProfile = onSnapshot(userRef, (snap) => {
+        if (!isMounted) return;
+        if (snap.exists()) {
+          const profileData = snap.data() as UserProfile;
+          console.log(`[AUTH SNAPSHOT UPD] Live profile update - UID: ${profileData.uid}, Status: ${profileData.status}`);
+          
+          if (profileData.status === 'banned') {
+            if (unsubscribeProfile) {
+              unsubscribeProfile();
+              unsubscribeProfile = null;
+            }
+            localStorage.clear();
+            sessionStorage.clear();
+            setUser(null);
+            setUserProfile(null);
+            if (isFirebaseUser) {
+              signOut(auth);
+            }
+            alert('Votre compte a été banni. Veuillez contacter l\'administrateur.');
+            window.location.reload();
+          } else {
+            setUserProfile(profileData);
+            localStorage.setItem('custom_session', JSON.stringify(profileData));
+          }
+        }
+      }, (error) => {
+        console.error("Error listening real-time to active user profile:", error);
+      });
+    };
+
+    if (initialProfile) {
+      startProfileListener(initialProfile.uid, false);
+    }
+
+    // Set up standard Firebase auth state listener
+    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (!isMounted) return;
+
+      if (firebaseUser) {
+        console.log(`[AUTH CENTRAL] Active Firebase User detected: UID = ${firebaseUser.uid}, Email = ${firebaseUser.email}`);
+        
+        // Ensure user profile documents are created/updated
+        const userRef = doc(db, 'users', firebaseUser.uid);
         const userSnap = await getDoc(userRef);
+        let profileData: UserProfile;
+
         if (!userSnap.exists()) {
-          const defaultAllowed = user.email === 'harounjaballi@gmail.com'
-            ? ['dashboard', 'pos', 'products', 'clients', 'sales', 'invoices', 'notes', 'users', 'settings']
-            : ['dashboard', 'pos', 'products', 'clients', 'sales', 'invoices', 'notes'];
-          const profileData: UserProfile = {
-            uid: user.uid,
-            email: user.email || '',
-            role: user.email === 'harounjaballi@gmail.com' ? 'admin' : 'user',
+          const defaultAllowed = ['dashboard', 'pos', 'products', 'clients', 'sales', 'invoices', 'notes', 'users', 'settings'];
+          profileData = {
+            uid: firebaseUser.uid,
+            email: firebaseUser.email || '',
+            role: 'admin',
             status: 'active',
-            allowedMenus: defaultAllowed
+            allowedMenus: defaultAllowed,
+            ownerId: firebaseUser.uid
           };
           await setDoc(userRef, profileData);
+        } else {
+          profileData = userSnap.data() as UserProfile;
+          if (!profileData.ownerId) {
+            profileData.ownerId = profileData.role === 'admin' ? profileData.uid : 'admin_fallback';
+            await setDoc(userRef, { ownerId: profileData.ownerId }, { merge: true });
+          }
         }
 
-        // Set up real-time listener for current user document
-        unsubscribeProfile = onSnapshot(userRef, (snap) => {
-          if (snap.exists()) {
-            const profileData = snap.data() as UserProfile;
-            if (profileData.status === 'banned') {
-              if (unsubscribeProfile) {
-                unsubscribeProfile();
-                unsubscribeProfile = null;
-              }
-              signOut(auth).then(() => {
-                alert('Votre compte a été banni. Veuillez contacter l\'administrateur.');
-              });
-              return;
-            }
-            setUserProfile(profileData);
-          }
-        });
-        setUser(user);
+        setUser(firebaseUser);
+        setUserProfile(profileData);
+        localStorage.setItem('custom_session', JSON.stringify(profileData));
+        setLoading(false);
+
+        // Start listening to live updates from the database for this Firebase user
+        startProfileListener(firebaseUser.uid, true);
       } else {
-        if (unsubscribeProfile) {
-          unsubscribeProfile();
-          unsubscribeProfile = null;
+        // Firebase Auth is signed out
+        // If we DO NOT have a custom localStorage session fallback either, then clear entirely
+        const currentCustomSession = localStorage.getItem('custom_session');
+        if (!currentCustomSession) {
+          console.log("[AUTH CENTRAL] No active user session - Unauthenticated status");
+          if (unsubscribeProfile) {
+            unsubscribeProfile();
+            unsubscribeProfile = null;
+          }
+          setUser(null);
+          setUserProfile(null);
+          setLoading(false);
+        } else {
+          console.log("[AUTH CENTRAL] No active Firebase Auth, keeping fallback custom session.");
         }
-        setUserProfile(null);
-        setUser(null);
       }
-      setLoading(false);
     });
 
     return () => {
+      isMounted = false;
       unsubscribeAuth();
       if (unsubscribeProfile) unsubscribeProfile();
     };
@@ -509,15 +553,15 @@ export default function App() {
  
             <div className="p-4 lg:p-8 flex-1">
               <Routes>
-                <Route path="/" element={hasMenuAccess(userProfile, 'dashboard') ? <Dashboard /> : <Navigate to={hasMenuAccess(userProfile, 'pos') ? '/pos' : (hasMenuAccess(userProfile, 'products') ? '/products' : (hasMenuAccess(userProfile, 'clients') ? '/clients' : (hasMenuAccess(userProfile, 'sales') ? '/sales' : (hasMenuAccess(userProfile, 'invoices') ? '/invoices' : '/settings'))))} replace />} />
-                <Route path="/products" element={hasMenuAccess(userProfile, 'products') ? <Products /> : <Navigate to="/" replace />} />
-                <Route path="/clients" element={hasMenuAccess(userProfile, 'clients') ? <Clients /> : <Navigate to="/" replace />} />
-                <Route path="/pos" element={hasMenuAccess(userProfile, 'pos') ? <POS /> : <Navigate to="/" replace />} />
-                <Route path="/sales" element={hasMenuAccess(userProfile, 'sales') ? <Sales /> : <Navigate to="/" replace />} />
-                <Route path="/invoices" element={hasMenuAccess(userProfile, 'invoices') ? <Invoices /> : <Navigate to="/" replace />} />
-                <Route path="/notes" element={hasMenuAccess(userProfile, 'notes') ? <Notes /> : <Navigate to="/" replace />} />
-                <Route path="/users" element={userProfile?.role === 'admin' && hasMenuAccess(userProfile, 'users') ? <UsersManager /> : <Navigate to="/" replace />} />
-                <Route path="/settings" element={hasMenuAccess(userProfile, 'settings') ? <Settings /> : <Navigate to="/" replace />} />
+                <Route path="/" element={hasMenuAccess(userProfile, 'dashboard') ? <Dashboard userProfile={userProfile} /> : <Navigate to={hasMenuAccess(userProfile, 'pos') ? '/pos' : (hasMenuAccess(userProfile, 'products') ? '/products' : (hasMenuAccess(userProfile, 'clients') ? '/clients' : (hasMenuAccess(userProfile, 'sales') ? '/sales' : (hasMenuAccess(userProfile, 'invoices') ? '/invoices' : '/settings'))))} replace />} />
+                <Route path="/products" element={hasMenuAccess(userProfile, 'products') ? <Products userProfile={userProfile} /> : <Navigate to="/" replace />} />
+                <Route path="/clients" element={hasMenuAccess(userProfile, 'clients') ? <Clients userProfile={userProfile} /> : <Navigate to="/" replace />} />
+                <Route path="/pos" element={hasMenuAccess(userProfile, 'pos') ? <POS userProfile={userProfile} /> : <Navigate to="/" replace />} />
+                <Route path="/sales" element={hasMenuAccess(userProfile, 'sales') ? <Sales userProfile={userProfile} /> : <Navigate to="/" replace />} />
+                <Route path="/invoices" element={hasMenuAccess(userProfile, 'invoices') ? <Invoices userProfile={userProfile} /> : <Navigate to="/" replace />} />
+                <Route path="/notes" element={hasMenuAccess(userProfile, 'notes') ? <Notes userProfile={userProfile} /> : <Navigate to="/" replace />} />
+                <Route path="/users" element={userProfile?.role === 'admin' && hasMenuAccess(userProfile, 'users') ? <UsersManager userProfile={userProfile} /> : <Navigate to="/" replace />} />
+                <Route path="/settings" element={hasMenuAccess(userProfile, 'settings') ? <Settings userProfile={userProfile} /> : <Navigate to="/" replace />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </div>

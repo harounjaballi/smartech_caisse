@@ -1,16 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { doc, onSnapshot, setDoc, collection, getDocs, query, where, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { StoreSettings } from '../types';
+import { StoreSettings, UserProfile } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
 import { Edit2, X, Settings as SettingsIcon, CheckCircle2, Store, Save, Download, Trash2, Database, AlertTriangle, Calendar } from 'lucide-react';
 import { cn } from '../lib/utils';
 import * as XLSX from 'xlsx';
 
-export default function Settings() {
+interface SettingsProps {
+  userProfile: UserProfile | null;
+}
+
+export default function Settings({ userProfile }: SettingsProps) {
   const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [success, setSuccess] = useState<string | null>(null);
+
+  const ownerId = userProfile?.ownerId || (userProfile?.role === 'admin' ? userProfile.uid : 'admin_fallback');
 
   // Form state for store settings - always editable now
   const [storeFormData, setStoreFormData] = useState({
@@ -32,10 +38,10 @@ export default function Settings() {
   const handleExportExcel = async () => {
     setIsExporting(true);
     try {
-      const productsSnap = await getDocs(collection(db, 'products'));
-      const clientsSnap = await getDocs(collection(db, 'clients'));
-      const salesSnap = await getDocs(collection(db, 'sales'));
-      const invoicesSnap = await getDocs(collection(db, 'invoices'));
+      const productsSnap = await getDocs(query(collection(db, 'products'), where('ownerId', '==', ownerId)));
+      const clientsSnap = await getDocs(query(collection(db, 'clients'), where('ownerId', '==', ownerId)));
+      const salesSnap = await getDocs(query(collection(db, 'sales'), where('ownerId', '==', ownerId)));
+      const invoicesSnap = await getDocs(query(collection(db, 'invoices'), where('ownerId', '==', ownerId)));
 
       const productsData = productsSnap.docs.map(doc => {
         const d = doc.data();
@@ -166,7 +172,7 @@ export default function Settings() {
       let invoicesDeleted = 0;
 
       if (purgeSales) {
-        const salesQuery = query(collection(db, 'sales'), where('date', '<=', limitDate));
+        const salesQuery = query(collection(db, 'sales'), where('ownerId', '==', ownerId), where('date', '<=', limitDate));
         const salesSnap = await getDocs(salesQuery);
         for (const docSnap of salesSnap.docs) {
           await deleteDoc(docSnap.ref);
@@ -175,7 +181,7 @@ export default function Settings() {
       }
 
       if (purgeInvoices) {
-        const invoicesQuery = query(collection(db, 'invoices'), where('date', '<=', limitDate));
+        const invoicesQuery = query(collection(db, 'invoices'), where('ownerId', '==', ownerId), where('date', '<=', limitDate));
         const invoicesSnap = await getDocs(invoicesQuery);
         for (const docSnap of invoicesSnap.docs) {
           await deleteDoc(docSnap.ref);
@@ -194,7 +200,7 @@ export default function Settings() {
   };
 
   useEffect(() => {
-    const unsubscribeStore = onSnapshot(doc(db, 'settings', 'store'), (snapshot) => {
+    const unsubscribeStore = onSnapshot(doc(db, 'settings', ownerId), (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data() as StoreSettings;
         setStoreSettings({ ...data, id: snapshot.id });
@@ -208,7 +214,7 @@ export default function Settings() {
         });
       } else {
         setStoreSettings({
-          id: 'store',
+          id: ownerId,
           storeName: 'SmarTech Solution',
           currency: 'DT',
           tva: 19,
@@ -225,23 +231,23 @@ export default function Settings() {
       }
       setLoading(false);
     }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'settings/store');
+      handleFirestoreError(error, OperationType.GET, `settings/${ownerId}`);
       setLoading(false);
     });
 
     return () => {
       unsubscribeStore();
     };
-  }, []);
+  }, [ownerId]);
 
   const handleStoreSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await setDoc(doc(db, 'settings', 'store'), storeFormData);
+      await setDoc(doc(db, 'settings', ownerId), storeFormData);
       setSuccess('Paramètres du magasin enregistrés avec succès !');
       setTimeout(() => setSuccess(null), 3000);
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'settings/store');
+      handleFirestoreError(error, OperationType.WRITE, `settings/${ownerId}`);
     }
   };
 

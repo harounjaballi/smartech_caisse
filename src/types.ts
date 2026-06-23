@@ -2,6 +2,7 @@ export interface Category {
   id: string;
   name: string;
   type: 'alimentation' | 'boissons' | 'entretien' | 'frais' | 'autre'; // For styling grocery departments
+  ownerId?: string;
 }
 
 export interface Product {
@@ -14,6 +15,7 @@ export interface Product {
   stock: number;
   expirationDate?: string;
   lowStockAlert?: number;
+  ownerId?: string;
 }
 
 export interface Client {
@@ -23,6 +25,7 @@ export interface Client {
   phone?: string;
   address?: string;
   debt: number;
+  ownerId?: string;
 }
 
 export interface SaleItem {
@@ -44,6 +47,7 @@ export interface Sale {
   tva: number;
   invoiceId?: string;
   items: SaleItem[];
+  ownerId?: string;
 }
 
 export interface Invoice {
@@ -61,15 +65,18 @@ export interface Invoice {
   tva: number;
   date: any;
   items: SaleItem[];
+  ownerId?: string;
 }
 
 export interface UserProfile {
   uid: string;
   email: string;
+  name?: string;
   role: 'admin' | 'user';
   status?: 'active' | 'banned';
   allowedMenus?: string[];
   password?: string;
+  ownerId?: string;
 }
 
 export interface StoreSettings {
@@ -80,6 +87,7 @@ export interface StoreSettings {
   phone?: string;
   tva: number;
   tvaEnabled?: boolean;
+  ownerId?: string;
 }
 
 export interface Note {
@@ -89,5 +97,6 @@ export interface Note {
   date: string; // The associated calendar/reminder date
   createdAt: any; // Timestamp or date
   userId: string;
+  ownerId?: string;
 }
 

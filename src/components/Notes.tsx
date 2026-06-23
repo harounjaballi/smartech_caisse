@@ -1,18 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, orderBy, serverTimestamp, where } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Note } from '../types';
+import { Note, UserProfile } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
 import { Plus, Search, Edit2, Trash2, X, Calendar, StickyNote, Clock, Bell, AlertCircle, CheckCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
 
-export default function Notes() {
+interface NotesProps {
+  userProfile: UserProfile | null;
+}
+
+export default function Notes({ userProfile }: NotesProps) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'upcoming' | 'past'>('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
+
+  const ownerId = userProfile?.ownerId || (userProfile?.role === 'admin' ? userProfile.uid : 'admin_fallback');
 
   // Form state
   const [formData, setFormData] = useState({
@@ -22,13 +28,14 @@ export default function Notes() {
   });
 
   useEffect(() => {
-    // Listen for all notes ordered by associated date
-    const q = query(collection(db, 'notes'), orderBy('date', 'desc'));
+    // Listen for notes of this owner, sort client-side to prevent needing a composite index
+    const q = query(collection(db, 'notes'), where('ownerId', '==', ownerId));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const parsedNotes = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       } as Note));
+      parsedNotes.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
       setNotes(parsedNotes);
       setLoading(false);
     }, (error) => {
@@ -38,7 +45,7 @@ export default function Notes() {
     return () => {
       unsubscribe();
     };
-  }, []);
+  }, [ownerId]);
 
   const getNoteStatus = (noteDateStr: string) => {
     const todayStr = new Date().toISOString().split('T')[0];
@@ -110,7 +117,8 @@ export default function Notes() {
           content: formData.content,
           date: formData.date,
           createdAt: serverTimestamp(),
-          userId: auth.currentUser.uid
+          userId: auth.currentUser?.uid || 'custom_user',
+          ownerId
         });
       }
       closeModal();

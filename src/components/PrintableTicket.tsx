@@ -6,19 +6,21 @@ import { db } from '../firebase';
 
 interface Props {
   invoice: Invoice;
+  ownerId?: string;
 }
 
-export const PrintableTicket = forwardRef<HTMLDivElement, Props>(({ invoice }, ref) => {
+export const PrintableTicket = forwardRef<HTMLDivElement, Props>(({ invoice, ownerId }, ref) => {
   const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
 
   useEffect(() => {
-    const unsubscribe = onSnapshot(doc(db, 'settings', 'store'), (snapshot) => {
+    const finalOwnerId = ownerId || invoice.ownerId || 'store';
+    const unsubscribe = onSnapshot(doc(db, 'settings', finalOwnerId), (snapshot) => {
       if (snapshot.exists()) {
         setStoreSettings(snapshot.data() as StoreSettings);
       }
     });
     return unsubscribe;
-  }, []);
+  }, [ownerId, invoice.ownerId]);
 
   let dateStr = '';
   try {

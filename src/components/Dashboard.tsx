@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
-import { collection, onSnapshot, query, orderBy, limit, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, limit, doc, updateDoc, deleteDoc, where } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Sale, Product, StoreSettings } from '../types';
+import { Sale, Product, StoreSettings, UserProfile } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
 import { createPortal } from 'react-dom';
 import * as XLSX from 'xlsx';
@@ -168,7 +168,11 @@ function PrintableReport({ activeModal, records, storeSettings, currency }: Prin
   );
 }
 
-export default function Dashboard() {
+interface DashboardProps {
+  userProfile: UserProfile | null;
+}
+
+export default function Dashboard({ userProfile }: DashboardProps) {
   const [sales, setSales] = useState<Sale[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
@@ -196,27 +200,41 @@ export default function Dashboard() {
   const [editingSupplyQty, setEditingSupplyQty] = useState('');
   const [editingSupplyPrice, setEditingSupplyPrice] = useState('');
 
+  const ownerId = userProfile?.ownerId || (userProfile?.role === 'admin' ? userProfile.uid : 'admin_fallback');
+
   useEffect(() => {
-    // Fetch last 2000 sales to build accurate daily summaries for last 100 days
-    const qSales = query(collection(db, 'sales'), orderBy('date', 'desc'), limit(2000));
+    // Fetch sales belonging to this store, sort client-side to avoid composite indexes
+    const qSales = query(collection(db, 'sales'), where('ownerId', '==', ownerId));
     const unsubscribeSales = onSnapshot(qSales, (snapshot) => {
-      setSales(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Sale)));
+      const sls = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Sale));
+      sls.sort((a, b) => {
+        const timeA = a.date?.seconds || 0;
+        const timeB = b.date?.seconds || 0;
+        return timeB - timeA;
+      });
+      setSales(sls);
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'sales'));
 
-    const unsubscribeProds = onSnapshot(collection(db, 'products'), (snapshot) => {
+    const unsubscribeProds = onSnapshot(query(collection(db, 'products'), where('ownerId', '==', ownerId)), (snapshot) => {
       setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product)));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'products'));
 
-    const unsubscribeSupplies = onSnapshot(query(collection(db, 'supplies'), orderBy('date', 'desc')), (snapshot) => {
-      setSupplies(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    const unsubscribeSupplies = onSnapshot(query(collection(db, 'supplies'), where('ownerId', '==', ownerId)), (snapshot) => {
+      const sups = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      sups.sort((a, b) => {
+        const timeA = a.date?.seconds || (a.date instanceof Date ? a.date.getTime() : 0);
+        const timeB = b.date?.seconds || (b.date instanceof Date ? b.date.getTime() : 0);
+        return timeB - timeA;
+      });
+      setSupplies(sups);
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'supplies'));
 
-    const unsubscribeStore = onSnapshot(doc(db, 'settings', 'store'), (snapshot) => {
+    const unsubscribeStore = onSnapshot(doc(db, 'settings', ownerId), (snapshot) => {
       if (snapshot.exists()) {
         setStoreSettings(snapshot.data() as StoreSettings);
       }
       setLoading(false);
-    }, (error) => handleFirestoreError(error, OperationType.GET, 'settings/store'));
+    }, (error) => handleFirestoreError(error, OperationType.GET, `settings/${ownerId}`));
 
     return () => {
       unsubscribeSales();

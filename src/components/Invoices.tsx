@@ -3,15 +3,20 @@ import { createPortal } from 'react-dom';
 import { collection, onSnapshot, query, orderBy, limit, doc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../firebase';
-import { Invoice, Product, Client, SaleItem, StoreSettings } from '../types';
+import { Invoice, Product, Client, SaleItem, StoreSettings, UserProfile } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
 import { Search, FileText, Eye, X, Printer, Download, User, Calendar, ShoppingBag, Plus, Trash2, Minus, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { cn } from '../lib/utils';
 import { PrintableTicket } from './PrintableTicket';
+import { where } from 'firebase/firestore';
 
-export default function Invoices() {
+interface InvoicesProps {
+  userProfile: UserProfile | null;
+}
+
+export default function Invoices({ userProfile }: InvoicesProps) {
   const navigate = useNavigate();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
@@ -20,6 +25,8 @@ export default function Invoices() {
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [isNewInvoiceModalOpen, setIsNewInvoiceModalOpen] = useState(false);
   const [productSearch, setProductSearch] = useState('');
+
+  const ownerId = userProfile?.ownerId || (userProfile?.role === 'admin' ? userProfile.uid : 'admin_fallback');
   
   const handlePrint = () => {
     console.log('Impression du ticket en cours...', selectedInvoice);
@@ -58,38 +65,47 @@ export default function Invoices() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const q = query(collection(db, 'invoices'), orderBy('date', 'desc'), limit(100));
+    const q = query(collection(db, 'invoices'), where('ownerId', '==', ownerId));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const invs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invoice));
+      invs.sort((a, b) => {
+        const timeA = a.date?.seconds || 0;
+        const timeB = b.date?.seconds || 0;
+        return timeB - timeA;
+      });
       setInvoices(invs);
       setLoading(false);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'invoices');
     });
 
-    const unsubscribeSettings = onSnapshot(doc(db, 'settings', 'store'), (snapshot) => {
+    const unsubscribeSettings = onSnapshot(doc(db, 'settings', ownerId), (snapshot) => {
       if (snapshot.exists()) {
         setStoreSettings(snapshot.data() as StoreSettings);
       }
     }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'settings');
+      handleFirestoreError(error, OperationType.GET, `settings/${ownerId}`);
     });
 
     return () => {
       unsubscribe();
       unsubscribeSettings();
     };
-  }, []);
+  }, [ownerId]);
 
   useEffect(() => {
     if (isNewInvoiceModalOpen) {
-      const unsubClients = onSnapshot(collection(db, 'clients'), (snap) => {
-        setClients(snap.docs.map(d => ({ id: d.id, ...d.data() } as Client)));
+      const unsubClients = onSnapshot(query(collection(db, 'clients'), where('ownerId', '==', ownerId)), (snap) => {
+        const cls = snap.docs.map(d => ({ id: d.id, ...d.data() } as Client));
+        cls.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        setClients(cls);
       }, (err) => {
         handleFirestoreError(err, OperationType.LIST, 'clients');
       });
-      const unsubProducts = onSnapshot(collection(db, 'products'), (snap) => {
-        setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() } as Product)));
+      const unsubProducts = onSnapshot(query(collection(db, 'products'), where('ownerId', '==', ownerId)), (snap) => {
+        const prods = snap.docs.map(d => ({ id: d.id, ...d.data() } as Product));
+        prods.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        setProducts(prods);
       }, (err) => {
         handleFirestoreError(err, OperationType.LIST, 'products');
       });
@@ -98,7 +114,7 @@ export default function Invoices() {
         unsubProducts();
       };
     }
-  }, [isNewInvoiceModalOpen]);
+  }, [isNewInvoiceModalOpen, ownerId]);
 
   const addToCart = (product: Product) => {
     setCart(prev => {
@@ -184,7 +200,7 @@ export default function Invoices() {
         console.log('Transaction started');
         
         // 1. ALL READS FIRST
-        const counterRef = doc(db, 'counters', 'invoices');
+        const counterRef = doc(db, 'counters', `invoices_${ownerId}`);
         const counterSnap = await transaction.get(counterRef);
         
         const productSnaps = await Promise.all(
@@ -255,7 +271,8 @@ export default function Invoices() {
           debt: remainingDebt,
           tva: tvaAmount,
           items: cart,
-          invoiceId: invoiceRef.id
+          invoiceId: invoiceRef.id,
+          ownerId
         };
 
         const invoiceData = {
@@ -272,7 +289,8 @@ export default function Invoices() {
           debt: remainingDebt,
           tva: tvaAmount,
           date: serverTimestamp(),
-          items: cart
+          items: cart,
+          ownerId
         };
 
         transaction.set(saleRef, saleData);
@@ -333,7 +351,7 @@ export default function Invoices() {
       {createPortal(
         <div className="print-container">
           {selectedInvoice && (
-            <PrintableTicket invoice={selectedInvoice} />
+            <PrintableTicket invoice={selectedInvoice} ownerId={ownerId} />
           )}
         </div>,
         document.body

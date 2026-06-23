@@ -1,15 +1,20 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { collection, onSnapshot, addDoc, updateDoc, doc, query, orderBy, serverTimestamp, runTransaction, getDoc, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, doc, query, orderBy, serverTimestamp, runTransaction, getDoc, setDoc, where } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Product, Client, SaleItem, Sale, Invoice, Category, StoreSettings } from '../types';
+import { Product, Client, SaleItem, Sale, Invoice, Category, StoreSettings, UserProfile } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
 import { Search, ShoppingCart, Trash2, Plus, Minus, User, CreditCard, CheckCircle, AlertCircle, Printer, X, FileText, Barcode, Filter, Tag } from 'lucide-react';
 import { cn, decodeAzertyBarcode } from '../lib/utils';
 import { format } from 'date-fns';
 import { PrintableTicket } from './PrintableTicket';
 
-export default function POS() {
+interface POSProps {
+  userProfile: UserProfile | null;
+}
+
+export default function POS({ userProfile }: POSProps) {
+  const ownerId = userProfile?.ownerId || (userProfile?.role === 'admin' ? userProfile.uid : 'admin_fallback');
   const [products, setProducts] = useState<Product[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -52,27 +57,33 @@ export default function POS() {
   };
 
   useEffect(() => {
-    const unsubscribeProds = onSnapshot(query(collection(db, 'products'), orderBy('name')), (snapshot) => {
-      setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product)));
+    const unsubscribeProds = onSnapshot(query(collection(db, 'products'), where('ownerId', '==', ownerId)), (snapshot) => {
+      const prods = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
+      prods.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      setProducts(prods);
     }, (err) => {
       handleFirestoreError(err, OperationType.LIST, 'products');
     });
-    const unsubscribeClients = onSnapshot(query(collection(db, 'clients'), orderBy('name')), (snapshot) => {
-      setClients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client)));
+    const unsubscribeClients = onSnapshot(query(collection(db, 'clients'), where('ownerId', '==', ownerId)), (snapshot) => {
+      const cls = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client));
+      cls.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      setClients(cls);
     }, (err) => {
       handleFirestoreError(err, OperationType.LIST, 'clients');
     });
-    const unsubscribeCats = onSnapshot(query(collection(db, 'categories'), orderBy('name')), (snapshot) => {
-      setCategories(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Category)));
+    const unsubscribeCats = onSnapshot(query(collection(db, 'categories'), where('ownerId', '==', ownerId)), (snapshot) => {
+      const cats = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Category));
+      cats.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      setCategories(cats);
     }, (err) => {
       handleFirestoreError(err, OperationType.LIST, 'categories');
     });
-    const unsubscribeStore = onSnapshot(doc(db, 'settings', 'store'), (snapshot) => {
+    const unsubscribeStore = onSnapshot(doc(db, 'settings', ownerId), (snapshot) => {
       if (snapshot.exists()) {
         setStoreSettings(snapshot.data() as StoreSettings);
       }
     }, (err) => {
-      handleFirestoreError(err, OperationType.GET, 'settings/store');
+      handleFirestoreError(err, OperationType.GET, `settings/${ownerId}`);
     });
     return () => {
       unsubscribeProds();
@@ -80,7 +91,7 @@ export default function POS() {
       unsubscribeCats();
       unsubscribeStore();
     };
-  }, []);
+  }, [ownerId]);
 
   // Auto-clear helper for scan notification
   useEffect(() => {
@@ -354,7 +365,7 @@ export default function POS() {
         console.log('Transaction started');
         
         // 1. ALL READS FIRST
-        const counterRef = doc(db, 'counters', 'invoices');
+        const counterRef = doc(db, 'counters', `invoices_${ownerId}`);
         const counterSnap = await transaction.get(counterRef);
         
         const productSnaps = await Promise.all(
@@ -425,7 +436,8 @@ export default function POS() {
           debt: remainingDebt,
           tva: tvaAmount,
           items: cart,
-          invoiceId: invoiceRef.id
+          invoiceId: invoiceRef.id,
+          ownerId
         };
 
         const invoiceData = {
@@ -442,7 +454,8 @@ export default function POS() {
           debt: remainingDebt,
           tva: tvaAmount,
           date: serverTimestamp(),
-          items: cart
+          items: cart,
+          ownerId
         };
 
         transaction.set(saleRef, saleData);
@@ -473,7 +486,7 @@ export default function POS() {
       {createPortal(
         <div className="print-container">
           {lastInvoice && (
-            <PrintableTicket invoice={lastInvoice} />
+            <PrintableTicket invoice={lastInvoice} ownerId={ownerId} />
           )}
         </div>,
         document.body

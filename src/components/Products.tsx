@@ -1,12 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, orderBy, setDoc, getDocs, where } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Product, Category, StoreSettings } from '../types';
+import { Product, Category, StoreSettings, UserProfile } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
 import { Plus, Search, Edit2, Trash2, X, AlertTriangle, Package, Tag, Barcode } from 'lucide-react';
 import { cn, decodeAzertyBarcode } from '../lib/utils';
 
-export default function Products() {
+interface ProductsProps {
+  userProfile: UserProfile | null;
+}
+
+export default function Products({ userProfile }: ProductsProps) {
+  const ownerId = userProfile?.ownerId || (userProfile?.role === 'admin' ? userProfile.uid : 'admin_fallback');
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
@@ -137,22 +142,24 @@ export default function Products() {
   const [sellPriceInput, setSellPriceInput] = useState('');
 
   useEffect(() => {
-    const unsubscribeProds = onSnapshot(query(collection(db, 'products'), orderBy('name')), (snapshot) => {
+    const unsubscribeProds = onSnapshot(query(collection(db, 'products'), where('ownerId', '==', ownerId)), (snapshot) => {
       const prods = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
+      prods.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
       setProducts(prods);
       setLoading(false);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'products');
     });
 
-    const unsubscribeCats = onSnapshot(query(collection(db, 'categories'), orderBy('name')), (snapshot) => {
+    const unsubscribeCats = onSnapshot(query(collection(db, 'categories'), where('ownerId', '==', ownerId)), (snapshot) => {
       const cats = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Category));
+      cats.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
       setCategories(cats);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'categories');
     });
 
-    const unsubscribeSettings = onSnapshot(doc(db, 'settings', 'store'), (snapshot) => {
+    const unsubscribeSettings = onSnapshot(doc(db, 'settings', ownerId), (snapshot) => {
       if (snapshot.exists()) {
         setStoreSettings(snapshot.data() as StoreSettings);
       }
@@ -165,7 +172,7 @@ export default function Products() {
       unsubscribeCats();
       unsubscribeSettings();
     };
-  }, []);
+  }, [ownerId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -203,7 +210,8 @@ export default function Products() {
             quantity: qtyAdded,
             buyPrice: formData.buyPrice,
             totalCost: expenseAmount,
-            date: new Date()
+            date: new Date(),
+            ownerId
           });
           console.log(`[DEBUG LOG] Produit "Modifié" (Stock Augmenté) de ${editingProduct.name}:`, {
             productId: editingProduct.id,
@@ -222,7 +230,8 @@ export default function Products() {
             quantity: -qtyRemoved,
             buyPrice: formData.buyPrice,
             totalCost: expenseAmount,
-            date: new Date()
+            date: new Date(),
+            ownerId
           });
           console.log(`[DEBUG LOG] Produit "Modifié" (Stock Diminué) de ${editingProduct.name}:`, {
             productId: editingProduct.id,
@@ -241,7 +250,7 @@ export default function Products() {
 
         await updateDoc(doc(db, 'products', editingProduct.id), formData);
       } else {
-        const docRef = await addDoc(collection(db, 'products'), formData);
+        const docRef = await addDoc(collection(db, 'products'), { ...formData, ownerId });
         const stockInt = parseInt(formData.stock.toString()) || 0;
         if (stockInt > 0) {
           const expenseAmount = stockInt * formData.buyPrice;
@@ -251,7 +260,8 @@ export default function Products() {
             quantity: stockInt,
             buyPrice: formData.buyPrice,
             totalCost: expenseAmount,
-            date: new Date()
+            date: new Date(),
+            ownerId
           });
           console.log(`[DEBUG LOG] Produit "Créé":`, {
             productId: docRef.id,
@@ -297,7 +307,8 @@ export default function Products() {
         quantity: qty,
         buyPrice: price,
         totalCost: expenseAmount,
-        date: new Date()
+        date: new Date(),
+        ownerId
       });
 
       console.log(`[DEBUG LOG] Approvisionnement effectué pour "${replenishProduct.name}":`, {
@@ -400,7 +411,8 @@ export default function Products() {
     try {
       await addDoc(collection(db, 'categories'), {
         name: newCategoryName.trim(),
-        type: 'autre'
+        type: 'autre',
+        ownerId
       });
       setFormData(prev => ({ ...prev, category: newCategoryName.trim() }));
       setNewCategoryName('');
@@ -419,9 +431,10 @@ export default function Products() {
     ];
     for (const cat of defaults) {
       try {
-        await setDoc(doc(db, 'categories', cat.id), {
+        await setDoc(doc(db, 'categories', cat.id + '_' + ownerId), {
           name: cat.name,
-          type: 'autre'
+          type: 'autre',
+          ownerId
         });
       } catch (err) {
         console.error('Error seeding category:', cat.name, err);

@@ -1,12 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, orderBy } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, orderBy, where } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Client, StoreSettings } from '../types';
+import { Client, StoreSettings, UserProfile } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
 import { Plus, Search, Edit2, Trash2, X, Phone, MapPin, Wallet, Coins, AlertCircle, CheckCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
 
-export default function Clients() {
+interface ClientsProps {
+  userProfile: UserProfile | null;
+}
+
+export default function Clients({ userProfile }: ClientsProps) {
   const [clients, setClients] = useState<Client[]>([]);
   const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
   const [loading, setLoading] = useState(true);
@@ -14,6 +18,8 @@ export default function Clients() {
   const [onlyWithDebt, setOnlyWithDebt] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
+
+  const ownerId = userProfile?.ownerId || (userProfile?.role === 'admin' ? userProfile.uid : 'admin_fallback');
 
   // Settlement state
   const [isSettleModalOpen, setIsSettleModalOpen] = useState(false);
@@ -33,16 +39,17 @@ export default function Clients() {
   const [debtInput, setDebtInput] = useState('');
 
   useEffect(() => {
-    const q = query(collection(db, 'clients'), orderBy('name'));
+    const q = query(collection(db, 'clients'), where('ownerId', '==', ownerId));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const cls = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client));
+      cls.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
       setClients(cls);
       setLoading(false);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'clients');
     });
 
-    const unsubscribeSettings = onSnapshot(doc(db, 'settings', 'store'), (snapshot) => {
+    const unsubscribeSettings = onSnapshot(doc(db, 'settings', ownerId), (snapshot) => {
       if (snapshot.exists()) {
         setStoreSettings(snapshot.data() as StoreSettings);
       }
@@ -54,7 +61,7 @@ export default function Clients() {
       unsubscribe();
       unsubscribeSettings();
     };
-  }, []);
+  }, [ownerId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,7 +69,7 @@ export default function Clients() {
       if (editingClient) {
         await updateDoc(doc(db, 'clients', editingClient.id), formData);
       } else {
-        await addDoc(collection(db, 'clients'), formData);
+        await addDoc(collection(db, 'clients'), { ...formData, ownerId });
       }
       closeModal();
     } catch (error) {

@@ -1,18 +1,25 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, orderBy, limit, doc, getDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, limit, doc, getDoc, where } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Sale, Invoice } from '../types';
+import { Sale, Invoice, UserProfile } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
-import { Search, Calendar, User, ShoppingBag, Eye, X, Printer, ChevronRight, Download } from 'lucide-react';
+import { Search, Calendar, User, ShoppingBag, Eye, X, Printer, Download, TrendingUp, Receipt, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { cn } from '../lib/utils';
 
-export default function Sales() {
+interface SalesProps {
+  userProfile: UserProfile | null;
+}
+
+export default function Sales({ userProfile }: SalesProps) {
   const [sales, setSales] = useState<Sale[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
+  const [filterStatus, setFilterStatus] = useState<'all' | 'paid' | 'partial'>('all');
+
+  const ownerId = userProfile?.ownerId || (userProfile?.role === 'admin' ? userProfile.uid : 'admin_fallback');
 
   const downloadPDF = async (sale: Sale) => {
     try {
@@ -20,15 +27,12 @@ export default function Sales() {
         alert("Aucune facture associée à cette vente.");
         return;
       }
-
       const invoiceSnap = await getDoc(doc(db, 'invoices', sale.invoiceId));
       if (!invoiceSnap.exists()) {
         alert("Facture introuvable.");
         return;
       }
-
       const invoice = { id: invoiceSnap.id, ...invoiceSnap.data() } as Invoice;
-
       const response = await fetch('/api/invoices/pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -51,100 +55,213 @@ export default function Sales() {
   };
 
   useEffect(() => {
-    const q = query(collection(db, 'sales'), orderBy('date', 'desc'), limit(100));
+    const q = query(collection(db, 'sales'), where('ownerId', '==', ownerId));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const sls = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Sale));
+      sls.sort((a, b) => {
+        const timeA = a.date?.seconds || 0;
+        const timeB = b.date?.seconds || 0;
+        return timeB - timeA;
+      });
       setSales(sls);
       setLoading(false);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'sales');
     });
     return unsubscribe;
-  }, []);
+  }, [ownerId]);
 
-  const filteredSales = sales.filter(s => 
-    s.clientName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    s.id.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredSales = sales.filter(s => {
+    const matchSearch =
+      s.clientName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      s.id.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchFilter =
+      filterStatus === 'all' ||
+      (filterStatus === 'paid' && s.debt === 0) ||
+      (filterStatus === 'partial' && s.debt > 0);
+    return matchSearch && matchFilter;
+  });
+
+  // Stats
+  const totalRevenue = sales.reduce((sum, s) => sum + s.paid, 0);
+  const totalDebt = sales.reduce((sum, s) => sum + s.debt, 0);
+  const paidCount = sales.filter(s => s.debt === 0).length;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="space-y-6 font-sans">
+
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">Historique des Ventes</h1>
-          <p className="text-xs text-slate-400 font-medium uppercase tracking-wider mt-0.5">Consultez et gérez vos transactions passées</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-500 mb-1">Boutique</p>
+          <h1 className="text-3xl font-black text-slate-900 tracking-tight leading-none">Historique des ventes</h1>
+          <p className="text-xs text-slate-400 font-medium mt-1.5">{sales.length} transaction{sales.length > 1 ? 's' : ''} enregistrée{sales.length > 1 ? 's' : ''}</p>
         </div>
       </div>
 
-      <div className="bg-white rounded-3xl border border-slate-100 shadow-xs overflow-hidden premium-shadow">
-        <div className="p-5 border-b border-slate-100 bg-slate-50/20">
-          <div className="relative max-w-md">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Rechercher par client ou ID..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border border-slate-100 rounded-xl focus:bg-white text-xs font-semibold text-slate-700 placeholder-slate-400 focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all duration-300"
+      {/* KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {/* Chiffre encaissé */}
+        <div className="bg-gradient-to-br from-indigo-600 to-indigo-500 rounded-2xl p-5 text-white shadow-lg shadow-indigo-600/20 relative overflow-hidden">
+          <div className="absolute -top-4 -right-4 w-24 h-24 bg-white/5 rounded-full" />
+          <div className="absolute -bottom-6 -right-2 w-16 h-16 bg-white/5 rounded-full" />
+          <div className="relative z-10">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-indigo-200">Encaissé</p>
+              <div className="w-8 h-8 bg-white/15 rounded-xl flex items-center justify-center">
+                <TrendingUp className="w-4 h-4 text-white" />
+              </div>
+            </div>
+            <p className="text-2xl font-black font-mono tracking-tight">{totalRevenue.toFixed(3)}<span className="text-sm font-bold text-indigo-200 ml-1">DT</span></p>
+          </div>
+        </div>
+
+        {/* Ventes payées */}
+        <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-xs premium-shadow">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Payées</p>
+            <div className="w-8 h-8 bg-emerald-50 rounded-xl flex items-center justify-center">
+              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+            </div>
+          </div>
+          <p className="text-2xl font-black text-slate-900 font-mono">{paidCount}<span className="text-sm font-bold text-slate-400 ml-1">/ {sales.length}</span></p>
+          <div className="mt-3 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-emerald-500 rounded-full transition-all duration-700"
+              style={{ width: sales.length ? `${(paidCount / sales.length) * 100}%` : '0%' }}
             />
           </div>
         </div>
 
-        <div className="overflow-x-auto text-[13px] font-medium text-slate-600">
-          <table className="w-full text-left border-collapse">
+        {/* Dettes */}
+        <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-xs premium-shadow">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Dettes</p>
+            <div className="w-8 h-8 bg-rose-50 rounded-xl flex items-center justify-center">
+              <AlertCircle className="w-4 h-4 text-rose-500" />
+            </div>
+          </div>
+          <p className="text-2xl font-black text-slate-900 font-mono">{totalDebt.toFixed(3)}<span className="text-sm font-bold text-slate-400 ml-1">DT</span></p>
+          <p className="text-[10px] text-rose-400 font-bold mt-1">{sales.filter(s => s.debt > 0).length} vente{sales.filter(s => s.debt > 0).length > 1 ? 's' : ''} en attente</p>
+        </div>
+      </div>
+
+      {/* Table Card */}
+      <div className="bg-white rounded-3xl border border-slate-100 shadow-xs overflow-hidden premium-shadow">
+        {/* Toolbar */}
+        <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+          <div className="relative w-full sm:max-w-xs">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Client ou ID…"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-100 rounded-xl text-xs font-semibold text-slate-700 placeholder-slate-400 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 outline-none transition-all"
+            />
+          </div>
+
+          {/* Filter pills */}
+          <div className="flex items-center gap-2">
+            {(['all', 'paid', 'partial'] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setFilterStatus(f)}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+                  filterStatus === f
+                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20"
+                    : "bg-slate-50 text-slate-500 hover:bg-slate-100"
+                )}
+              >
+                {f === 'all' ? 'Tout' : f === 'paid' ? '✓ Payé' : '⚠ Partiel'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Table */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
             <thead>
-              <tr className="bg-slate-50/50 border-b border-slate-100 text-slate-400 text-[10px] font-extrabold uppercase tracking-widest">
-                <th className="px-6 py-4">Date</th>
-                <th className="px-6 py-4">Client</th>
-                <th className="px-6 py-4">Total</th>
-                <th className="px-6 py-4">Statut Paiement</th>
-                <th className="px-6 py-4 text-right">Actions</th>
+              <tr className="bg-slate-50/60 border-b border-slate-100">
+                <th className="px-6 py-3.5 text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">Date</th>
+                <th className="px-6 py-3.5 text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">Client</th>
+                <th className="px-6 py-3.5 text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">Total</th>
+                <th className="px-6 py-3.5 text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">Statut</th>
+                <th className="px-6 py-3.5 text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 text-right">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100/70">
+            <tbody className="divide-y divide-slate-50">
               {loading ? (
-                <tr>
-                  <td colSpan={5} className="px-6 py-10 text-center text-gray-500">Chargement...</td>
-                </tr>
+                // Skeleton rows
+                Array.from({ length: 5 }).map((_, i) => (
+                  <tr key={i}>
+                    {Array.from({ length: 5 }).map((_, j) => (
+                      <td key={j} className="px-6 py-4">
+                        <div className="h-3 bg-slate-100 rounded-full animate-pulse" style={{ width: `${60 + Math.random() * 30}%` }} />
+                      </td>
+                    ))}
+                  </tr>
+                ))
               ) : filteredSales.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-10 text-center text-gray-500">Aucune vente trouvée.</td>
+                  <td colSpan={5} className="px-6 py-16 text-center">
+                    <Receipt className="w-10 h-10 text-slate-200 mx-auto mb-3" />
+                    <p className="text-sm font-bold text-slate-400">Aucune vente trouvée</p>
+                    <p className="text-xs text-slate-300 mt-1">Essayez un autre terme de recherche</p>
+                  </td>
                 </tr>
               ) : (
                 filteredSales.map((sale) => (
-                  <tr key={sale.id} className="hover:bg-gray-50/50 transition-colors">
+                  <tr
+                    key={sale.id}
+                    className="hover:bg-indigo-50/30 transition-colors group cursor-pointer"
+                    onClick={() => setSelectedSale(sale)}
+                  >
                     <td className="px-6 py-4">
-                      <div className="text-sm font-medium text-gray-900">
-                        {sale.date?.toDate ? format(sale.date.toDate(), 'dd MMM yyyy HH:mm', { locale: fr }) : 'Date inconnue'}
+                      <div className="text-sm font-bold text-slate-800">
+                        {sale.date?.toDate ? format(sale.date.toDate(), 'dd MMM yyyy', { locale: fr }) : '—'}
                       </div>
-                      <div className="text-[10px] text-gray-400 font-mono uppercase tracking-tighter">ID: {sale.id.slice(0, 8)}</div>
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <Clock className="w-3 h-3 text-slate-300" />
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          {sale.date?.toDate ? format(sale.date.toDate(), 'HH:mm') : '—'}
+                        </span>
+                      </div>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <User className="w-4 h-4 text-gray-400" />
-                        <span className="text-sm font-medium text-gray-700">{sale.clientName}</span>
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-100 to-cyan-100 flex items-center justify-center text-[10px] font-black text-indigo-600 shrink-0">
+                          {sale.clientName?.[0]?.toUpperCase() || '?'}
+                        </div>
+                        <span className="text-sm font-bold text-slate-700">{sale.clientName || 'Client inconnu'}</span>
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="text-sm font-black text-gray-900 font-mono">{sale.total.toFixed(3)} DT</div>
+                      <span className="text-sm font-black text-slate-900 font-mono">{sale.total.toFixed(3)}</span>
+                      <span className="text-[10px] text-slate-400 font-bold ml-1">DT</span>
                     </td>
                     <td className="px-6 py-4">
                       {sale.debt > 0 ? (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-700">
-                          Partiel (-{sale.debt.toFixed(3)} DT)
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black bg-rose-50 text-rose-600 border border-rose-100">
+                          <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+                          -{sale.debt.toFixed(3)} DT
                         </span>
                       ) : (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black bg-emerald-50 text-emerald-600 border border-emerald-100">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                           Payé
                         </span>
                       )}
                     </td>
                     <td className="px-6 py-4 text-right">
                       <button
-                        onClick={() => setSelectedSale(sale)}
-                        className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                        onClick={(e) => { e.stopPropagation(); setSelectedSale(sale); }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
                       >
-                        <Eye className="w-5 h-5" />
+                        <Eye className="w-3.5 h-3.5" />
+                        Voir
                       </button>
                     </td>
                   </tr>
@@ -153,61 +270,88 @@ export default function Sales() {
             </tbody>
           </table>
         </div>
+
+        {/* Footer count */}
+        {!loading && filteredSales.length > 0 && (
+          <div className="px-6 py-3 border-t border-slate-50 bg-slate-50/30">
+            <p className="text-[10px] font-bold text-slate-400">{filteredSales.length} résultat{filteredSales.length > 1 ? 's' : ''}</p>
+          </div>
+        )}
       </div>
 
       {/* Sale Detail Modal */}
       {selectedSale && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden border border-gray-100 flex flex-col max-h-[90vh]">
-            <div className="px-8 py-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
-              <div>
-                <h2 className="text-xl font-black text-gray-900">Détails de la Vente</h2>
-                <p className="text-xs text-gray-500 font-mono uppercase tracking-widest mt-1">ID: {selectedSale.id}</p>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <div
+            className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden border border-slate-100 flex flex-col max-h-[90vh]"
+            style={{ animation: 'modalIn 0.2s cubic-bezier(0.34,1.56,0.64,1)' }}
+          >
+            {/* Modal Header */}
+            <div className="px-8 py-5 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-600 to-cyan-500 flex items-center justify-center shadow-md shadow-indigo-600/20">
+                  <Receipt className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-base font-black text-slate-900 leading-none">Détails de la vente</h2>
+                  <p className="text-[10px] text-slate-400 font-mono uppercase tracking-wider mt-0.5">{selectedSale.id.slice(0, 12)}…</p>
+                </div>
               </div>
-              <button onClick={() => setSelectedSale(null)} className="p-2 text-gray-400 hover:text-gray-600 rounded-lg">
-                <X className="w-6 h-6" />
+              <button
+                onClick={() => setSelectedSale(null)}
+                className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+              >
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-8 space-y-8">
-              <div className="grid grid-cols-2 gap-8">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Client</label>
-                  <div className="flex items-center gap-2 text-gray-900 font-bold">
-                    <User className="w-5 h-5 text-indigo-600" />
-                    {selectedSale.clientName}
+            <div className="flex-1 overflow-y-auto p-8 space-y-6">
+              {/* Client + Date */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
+                  <p className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2">Client</p>
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-100 to-cyan-100 flex items-center justify-center text-xs font-black text-indigo-600">
+                      {selectedSale.clientName?.[0]?.toUpperCase() || '?'}
+                    </div>
+                    <span className="font-black text-slate-800 text-sm">{selectedSale.clientName}</span>
                   </div>
                 </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">Date & Heure</label>
-                  <div className="flex items-center gap-2 text-gray-900 font-bold">
-                    <Calendar className="w-5 h-5 text-indigo-600" />
-                    {selectedSale.date?.toDate ? format(selectedSale.date.toDate(), 'PPP p', { locale: fr }) : 'Inconnue'}
+                <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
+                  <p className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-2">Date & heure</p>
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-indigo-500 shrink-0" />
+                    <span className="font-bold text-slate-800 text-sm">
+                      {selectedSale.date?.toDate ? format(selectedSale.date.toDate(), 'PPP p', { locale: fr }) : 'Inconnue'}
+                    </span>
                   </div>
                 </div>
               </div>
 
-              <div className="space-y-4">
-                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block flex items-center gap-2">
-                  <ShoppingBag className="w-4 h-4" /> Articles Vendus
-                </label>
-                <div className="bg-gray-50 rounded-2xl border border-gray-150 overflow-hidden">
-                  <table className="w-full text-left border-collapse">
+              {/* Items Table */}
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-3 flex items-center gap-2">
+                  <ShoppingBag className="w-3.5 h-3.5" /> Articles vendus
+                </p>
+                <div className="rounded-2xl border border-slate-100 overflow-hidden">
+                  <table className="w-full text-left">
                     <thead>
-                      <tr className="text-[10px] font-bold text-gray-400 uppercase tracking-widest border-b border-gray-150">
-                        <th className="px-6 py-3">Produit</th>
-                        <th className="px-6 py-3 text-center">Qté</th>
-                        <th className="px-6 py-3 text-right">Prix</th>
-                        <th className="px-6 py-3 text-right">Total</th>
+                      <tr className="bg-slate-50 border-b border-slate-100">
+                        <th className="px-5 py-3 text-[10px] font-black uppercase tracking-wider text-slate-400">Produit</th>
+                        <th className="px-5 py-3 text-[10px] font-black uppercase tracking-wider text-slate-400 text-center">Qté</th>
+                        <th className="px-5 py-3 text-[10px] font-black uppercase tracking-wider text-slate-400 text-right">P.U</th>
+                        <th className="px-5 py-3 text-[10px] font-black uppercase tracking-wider text-slate-400 text-right">Total</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-150">
+                    <tbody className="divide-y divide-slate-50">
                       {selectedSale.items.map((item, idx) => (
-                        <tr key={idx} className="text-sm">
-                          <td className="px-6 py-3 font-bold text-gray-900">{item.name}</td>
-                          <td className="px-6 py-3 text-center font-mono">{item.quantity}</td>
-                          <td className="px-6 py-3 text-right font-mono">{item.price.toFixed(3)}</td>
-                          <td className="px-6 py-3 text-right font-black text-indigo-600 font-mono">{item.total.toFixed(3)} DT</td>
+                        <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="px-5 py-3 text-sm font-bold text-slate-800">{item.name}</td>
+                          <td className="px-5 py-3 text-center">
+                            <span className="inline-flex items-center justify-center w-7 h-7 bg-indigo-50 text-indigo-700 text-xs font-black rounded-lg">{item.quantity}</span>
+                          </td>
+                          <td className="px-5 py-3 text-right text-xs font-mono text-slate-500">{item.price.toFixed(3)}</td>
+                          <td className="px-5 py-3 text-right text-sm font-black text-indigo-600 font-mono">{item.total.toFixed(3)} DT</td>
                         </tr>
                       ))}
                     </tbody>
@@ -215,43 +359,52 @@ export default function Sales() {
                 </div>
               </div>
 
-              <div className="bg-gray-900 text-white p-8 rounded-3xl space-y-4 shadow-xl shadow-gray-900/20">
-                <div className="flex justify-between items-center opacity-70">
-                  <span className="text-sm uppercase tracking-widest font-bold">Total Vente</span>
+              {/* Summary */}
+              <div className="bg-slate-900 rounded-2xl p-6 text-white space-y-3">
+                <div className="flex justify-between items-center text-slate-400 text-sm">
+                  <span className="font-bold uppercase tracking-wider text-xs">Total vente</span>
                   <span className="font-mono">{selectedSale.total.toFixed(3)} DT</span>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm uppercase tracking-widest font-bold">Montant Payé</span>
-                  <span className="text-xl font-black font-mono">{selectedSale.paid.toFixed(3)} DT</span>
+                <div className="flex justify-between items-center border-t border-white/10 pt-3">
+                  <span className="font-black uppercase tracking-wider text-xs">Montant payé</span>
+                  <span className="text-xl font-black font-mono text-emerald-400">{selectedSale.paid.toFixed(3)} DT</span>
                 </div>
                 {selectedSale.debt > 0 && (
-                  <div className="flex justify-between items-center text-red-400 pt-2 border-t border-white/10">
-                    <span className="text-sm uppercase tracking-widest font-bold">Reste à payer (Dette)</span>
-                    <span className="text-xl font-black font-mono">{selectedSale.debt.toFixed(3)} DT</span>
+                  <div className="flex justify-between items-center border-t border-white/10 pt-3">
+                    <span className="font-black uppercase tracking-wider text-xs text-rose-400">Reste à payer</span>
+                    <span className="text-xl font-black font-mono text-rose-400">{selectedSale.debt.toFixed(3)} DT</span>
                   </div>
                 )}
               </div>
             </div>
 
-            <div className="p-8 border-t border-gray-100 bg-gray-50/50 flex gap-4">
-              <button 
+            {/* Modal Footer */}
+            <div className="p-6 border-t border-slate-100 bg-slate-50/50 flex gap-3">
+              <button
                 onClick={() => downloadPDF(selectedSale)}
-                className="flex-1 py-4 bg-indigo-600 text-white font-bold rounded-2xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/15"
+                className="flex-1 py-3 bg-indigo-600 text-white font-black text-xs uppercase tracking-wider rounded-2xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20"
               >
-                <Download className="w-5 h-5" />
+                <Download className="w-4 h-4" />
                 Télécharger PDF
               </button>
-              <button 
+              <button
                 onClick={() => window.print()}
-                className="flex-1 py-4 bg-white border border-gray-200 text-gray-900 font-bold rounded-2xl hover:bg-gray-100 transition-all flex items-center justify-center gap-2"
+                className="flex-1 py-3 bg-white border border-slate-200 text-slate-700 font-black text-xs uppercase tracking-wider rounded-2xl hover:bg-slate-50 transition-all flex items-center justify-center gap-2"
               >
-                <Printer className="w-5 h-5" />
+                <Printer className="w-4 h-4" />
                 Imprimer
               </button>
             </div>
           </div>
         </div>
       )}
+
+      <style>{`
+        @keyframes modalIn {
+          from { opacity: 0; transform: scale(0.95) translateY(8px); }
+          to   { opacity: 1; transform: scale(1)    translateY(0); }
+        }
+      `}</style>
     </div>
   );
 }
