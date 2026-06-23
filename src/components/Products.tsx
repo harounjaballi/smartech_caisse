@@ -588,208 +588,210 @@ export default function Products({ userProfile }: ProductsProps) {
 
       {/* Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden border border-gray-100">
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-2 sm:p-4 bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[calc(100vh-24px)] sm:max-h-[85vh] overflow-hidden border border-gray-100 animate-in zoom-in-95 duration-150">
+            <div className="flex-shrink-0 px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
               <h2 className="text-lg font-bold text-gray-900">
                 {editingProduct ? 'Modifier Produit' : 'Nouveau Produit'}
               </h2>
-              <button onClick={closeModal} className="p-2 text-gray-400 hover:text-gray-600 rounded-lg">
+              <button onClick={closeModal} className="p-2 text-gray-400 hover:text-gray-600 rounded-lg cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Nom du produit</label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
-                  />
-                </div>
-
-                <div className="col-span-2 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="block text-xs font-black uppercase tracking-wider text-slate-700">
-                      Code à barre / Référence
-                    </label>
-                    <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-100">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      Scanner Douchette Prêt
-                    </span>
-                  </div>
-                  
-                  <div className="relative group">
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                      <Barcode className="h-4.5 w-4.5 text-indigo-500 group-focus-within:text-indigo-600" />
-                    </div>
+            <form onSubmit={handleSubmit} className="flex-1 flex flex-col min-h-0 overflow-hidden">
+              <div className="flex-1 overflow-y-auto p-6 space-y-4 touch-pan-y">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Nom du produit</label>
                     <input
                       type="text"
-                      placeholder="Pointez votre douchette et flashez, ou tapez ici..."
-                      value={formData.barcode}
-                      onChange={(e) => setFormData({ ...formData, barcode: decodeAzertyBarcode(e.target.value) })}
-                      className="w-full pl-11 pr-24 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white text-xs font-bold font-mono text-slate-800 placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all duration-300"
+                      required
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
                     />
-                    <div className="absolute inset-y-1.5 right-1.5 flex items-center gap-1">
+                  </div>
+
+                  <div className="col-span-2 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-black uppercase tracking-wider text-slate-700">
+                        Code à barre / Référence
+                      </label>
+                      <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-100">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        Scanner Douchette Prêt
+                      </span>
+                    </div>
+                    
+                    <div className="relative group">
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                        <Barcode className="h-4.5 w-4.5 text-indigo-500 group-focus-within:text-indigo-600" />
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="Pointez votre douchette et flashez, ou tapez ici..."
+                        value={formData.barcode}
+                        onChange={(e) => setFormData({ ...formData, barcode: decodeAzertyBarcode(e.target.value) })}
+                        className="w-full pl-11 pr-24 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white text-xs font-bold font-mono text-slate-800 placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all duration-300"
+                      />
+                      <div className="absolute inset-y-1.5 right-1.5 flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const randomCode = '619' + Math.floor(1000000000 + Math.random() * 9000000000).toString();
+                            setFormData({ ...formData, barcode: randomCode });
+                            playBeep('success');
+                          }}
+                          className="h-full px-2.5 bg-slate-100 hover:bg-slate-200 text-[10px] font-black uppercase tracking-wider text-slate-600 rounded-lg transition-colors border border-slate-200 cursor-pointer"
+                          title="Générer un code-barres aléatoire commençant par 619 Tunisie"
+                        >
+                          Générer
+                        </button>
+                      </div>
+                    </div>
+
+                    {scanStatus === 'scanned' && (
+                      <div className="text-[11px] font-black text-emerald-600 bg-emerald-50/80 px-3 py-1.5 rounded-xl border border-emerald-100 flex items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-300">
+                        <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                        <span>{scanMessage}</span>
+                      </div>
+                    )}
+                    
+                    <p className="text-[10px] text-slate-500 font-sans leading-relaxed">
+                      Vous pouvez scanner directement le produit à tout moment pendant que ce formulaire est ouvert. La douchette remplira automatiquement ce champ et émettra un signal sonore.
+                    </p>
+                  </div>
+
+                  <div className="col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Catégorie</label>
+                    <div className="flex gap-2">
+                      <select
+                        value={formData.category}
+                        onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                        className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none text-slate-800 bg-white"
+                        required
+                      >
+                        {categories.length === 0 ? (
+                          <option value="">⚠️ Veuillez créer une catégorie</option>
+                        ) : (
+                          <>
+                            <option value="">-- Choisir une catégorie --</option>
+                            {categories.map(cat => (
+                              <option key={cat.id} value={cat.name}>{cat.name}</option>
+                            ))}
+                          </>
+                        )}
+                      </select>
                       <button
                         type="button"
-                        onClick={() => {
-                          const randomCode = '619' + Math.floor(1000000000 + Math.random() * 9000000000).toString();
-                          setFormData({ ...formData, barcode: randomCode });
-                          playBeep('success');
-                        }}
-                        className="h-full px-2.5 bg-slate-100 hover:bg-slate-200 text-[10px] font-black uppercase tracking-wider text-slate-600 rounded-lg transition-colors border border-slate-200 cursor-pointer"
-                        title="Générer un code-barres aléatoire commençant par 619 Tunisie"
+                        onClick={() => setIsQuickCategoryModalOpen(true)}
+                        className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-100 transition-colors cursor-pointer"
+                        title="Ajouter une catégorie"
                       >
-                        Générer
+                        <Plus className="w-5 h-5" />
                       </button>
                     </div>
                   </div>
 
-                  {scanStatus === 'scanned' && (
-                    <div className="text-[11px] font-black text-emerald-600 bg-emerald-50/80 px-3 py-1.5 rounded-xl border border-emerald-100 flex items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-300">
-                      <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                      <span>{scanMessage}</span>
-                    </div>
-                  )}
-                  
-                  <p className="text-[10px] text-slate-500 font-sans leading-relaxed">
-                    Vous pouvez scanner directement le produit à tout moment pendant que ce formulaire est ouvert. La douchette remplira automatiquement ce champ et émettra un signal sonore.
-                  </p>
-                </div>
-
-                <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Catégorie</label>
-                  <div className="flex gap-2">
-                    <select
-                      value={formData.category}
-                      onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                      className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none text-slate-800 bg-white"
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Stock Initial</label>
+                    <input
+                      type="number"
                       required
-                    >
-                      {categories.length === 0 ? (
-                        <option value="">⚠️ Veuillez créer une catégorie</option>
-                      ) : (
-                        <>
-                          <option value="">-- Choisir une catégorie --</option>
-                          {categories.map(cat => (
-                            <option key={cat.id} value={cat.name}>{cat.name}</option>
-                          ))}
-                        </>
-                      )}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => setIsQuickCategoryModalOpen(true)}
-                      className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-100 transition-colors cursor-pointer"
-                      title="Ajouter une catégorie"
-                    >
-                      <Plus className="w-5 h-5" />
-                    </button>
+                      min="0"
+                      value={formData.stock}
+                      onChange={(e) => setFormData({ ...formData, stock: parseInt(e.target.value) })}
+                      className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                    />
                   </div>
-                </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Stock Initial</label>
-                  <input
-                    type="number"
-                    required
-                    min="0"
-                    value={formData.stock}
-                    onChange={(e) => setFormData({ ...formData, stock: parseInt(e.target.value) })}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
-                  />
-                </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Alerte Stock Faible</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={formData.lowStockAlert}
+                      onChange={(e) => setFormData({ ...formData, lowStockAlert: parseInt(e.target.value) })}
+                      className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                    />
+                  </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Alerte Stock Faible</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={formData.lowStockAlert}
-                    onChange={(e) => setFormData({ ...formData, lowStockAlert: parseInt(e.target.value) })}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
-                  />
-                </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Prix Achat ({storeSettings?.currency || 'DT'})</label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      required
+                      value={buyPriceInput}
+                      onChange={(e) => {
+                        const value = e.target.value.replace(',', '.');
+                        if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                          setBuyPriceInput(value);
+                          const parsed = parseFloat(value) || 0;
+                          setFormData({ ...formData, buyPrice: Math.round(parsed * 1000) / 1000 });
+                        }
+                      }}
+                      onBlur={() => {
+                        const parsed = parseFloat(buyPriceInput) || 0;
+                        const rounded = Math.round(parsed * 1000) / 1000;
+                        setBuyPriceInput(rounded === 0 ? '' : rounded.toFixed(3));
+                        setFormData({ ...formData, buyPrice: rounded });
+                      }}
+                      placeholder="0.00"
+                      className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                    />
+                  </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Prix Achat ({storeSettings?.currency || 'DT'})</label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    required
-                    value={buyPriceInput}
-                    onChange={(e) => {
-                      const value = e.target.value.replace(',', '.');
-                      if (value === '' || /^\d*\.?\d*$/.test(value)) {
-                        setBuyPriceInput(value);
-                        const parsed = parseFloat(value) || 0;
-                        setFormData({ ...formData, buyPrice: Math.round(parsed * 1000) / 1000 });
-                      }
-                    }}
-                    onBlur={() => {
-                      const parsed = parseFloat(buyPriceInput) || 0;
-                      const rounded = Math.round(parsed * 1000) / 1000;
-                      setBuyPriceInput(rounded === 0 ? '' : rounded.toFixed(3));
-                      setFormData({ ...formData, buyPrice: rounded });
-                    }}
-                    placeholder="0.00"
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
-                  />
-                </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Prix Vente ({storeSettings?.currency || 'DT'})</label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      required
+                      value={sellPriceInput}
+                      onChange={(e) => {
+                        const value = e.target.value.replace(',', '.');
+                        if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                          setSellPriceInput(value);
+                          const parsed = parseFloat(value) || 0;
+                          setFormData({ ...formData, sellPrice: Math.round(parsed * 1000) / 1000 });
+                        }
+                      }}
+                      onBlur={() => {
+                        const parsed = parseFloat(sellPriceInput) || 0;
+                        const rounded = Math.round(parsed * 1000) / 1000;
+                        setSellPriceInput(rounded === 0 ? '' : rounded.toFixed(3));
+                        setFormData({ ...formData, sellPrice: rounded });
+                      }}
+                      placeholder="0.00"
+                      className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                    />
+                  </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Prix Vente ({storeSettings?.currency || 'DT'})</label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    required
-                    value={sellPriceInput}
-                    onChange={(e) => {
-                      const value = e.target.value.replace(',', '.');
-                      if (value === '' || /^\d*\.?\d*$/.test(value)) {
-                        setSellPriceInput(value);
-                        const parsed = parseFloat(value) || 0;
-                        setFormData({ ...formData, sellPrice: Math.round(parsed * 1000) / 1000 });
-                      }
-                    }}
-                    onBlur={() => {
-                      const parsed = parseFloat(sellPriceInput) || 0;
-                      const rounded = Math.round(parsed * 1000) / 1000;
-                      setSellPriceInput(rounded === 0 ? '' : rounded.toFixed(3));
-                      setFormData({ ...formData, sellPrice: rounded });
-                    }}
-                    placeholder="0.00"
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
-                  />
-                </div>
-
-                <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Date Expiration</label>
-                  <input
-                    type="date"
-                    value={formData.expirationDate}
-                    onChange={(e) => setFormData({ ...formData, expirationDate: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
-                  />
+                  <div className="col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Date Expiration</label>
+                    <input
+                      type="date"
+                      value={formData.expirationDate}
+                      onChange={(e) => setFormData({ ...formData, expirationDate: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none box-border"
+                    />
+                  </div>
                 </div>
               </div>
 
-              <div className="pt-4 flex gap-3">
+              <div className="flex-shrink-0 border-t border-gray-100 p-4 bg-gray-50/70 flex gap-3 pb-[calc(1rem+env(safe-area-inset-bottom,0px))]">
                 <button
                   type="button"
                   onClick={closeModal}
-                  className="flex-1 px-4 py-2.5 bg-gray-100 text-gray-700 font-semibold rounded-xl hover:bg-gray-200 transition-colors"
+                  className="flex-1 px-4 py-2.5 bg-gray-150 hover:bg-gray-200 text-gray-700 font-bold rounded-xl transition-colors cursor-pointer text-sm"
                 >
                   Annuler
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 px-4 py-2.5 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-600/15"
+                  className="flex-1 px-4 py-2.5 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-600/15 cursor-pointer text-sm"
                 >
                   {editingProduct ? 'Enregistrer' : 'Ajouter'}
                 </button>
@@ -957,9 +959,9 @@ export default function Products({ userProfile }: ProductsProps) {
 
       {/* Replenish Stock Modal */}
       {replenishProduct && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-100 p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-2 sm:p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col max-h-[calc(100vh-24px)] sm:max-h-[85vh] overflow-hidden border border-slate-100">
+            <div className="flex-shrink-0 px-6 py-4 border-b border-slate-100 flex items-center justify-between">
               <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider">
                 Approvisionner : {replenishProduct.name}
               </h3>
@@ -971,58 +973,60 @@ export default function Products({ userProfile }: ProductsProps) {
               </button>
             </div>
             
-            <form onSubmit={handleReplenishSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-black uppercase tracking-wider text-slate-600 mb-1">
-                  Quantité à ajouter au stock
-                </label>
-                <input
-                  type="number"
-                  required
-                  min="1"
-                  placeholder="Ex: 50"
-                  value={replenishQty}
-                  onChange={(e) => setReplenishQty(e.target.value)}
-                  className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-indigo-500 outline-none text-xs font-bold"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-black uppercase tracking-wider text-slate-600 mb-1">
-                  Prix d'achat unitaire ({storeSettings?.currency || 'DT'})
-                </label>
-                <input
-                  type="number"
-                  step="0.001"
-                  required
-                  min="0.001"
-                  placeholder="Ex: 2.500"
-                  value={replenishPrice}
-                  onChange={(e) => setReplenishPrice(e.target.value)}
-                  className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-indigo-500 outline-none text-xs font-bold font-mono"
-                />
-              </div>
-
-              {replenishQty && replenishPrice && (
-                <div className="p-3.5 bg-slate-50 border border-slate-100 rounded-xl space-y-1 my-2">
-                  <div className="flex justify-between text-xs text-slate-500 font-medium">
-                    <span>Quantité :</span>
-                    <span className="font-bold text-slate-700">{replenishQty}</span>
-                  </div>
-                  <div className="flex justify-between text-xs text-slate-500 font-medium">
-                    <span>Prix unitaire :</span>
-                    <span className="font-bold text-slate-700">{parseFloat(replenishPrice).toFixed(3)} {storeSettings?.currency || 'DT'}</span>
-                  </div>
-                  <div className="border-t border-slate-200/50 my-1.5 pt-1.5 flex justify-between text-xs font-bold text-slate-800">
-                    <span>Dépense totale estimée :</span>
-                    <span className="text-emerald-700 font-black">
-                      {(parseInt(replenishQty) * parseFloat(replenishPrice)).toFixed(3)} {storeSettings?.currency || 'DT'}
-                    </span>
-                  </div>
+            <form onSubmit={handleReplenishSubmit} className="flex-1 flex flex-col min-h-0 overflow-hidden">
+              <div className="flex-1 overflow-y-auto p-6 space-y-4 touch-pan-y">
+                <div>
+                  <label className="block text-xs font-black uppercase tracking-wider text-slate-600 mb-1">
+                    Quantité à ajouter au stock
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="1"
+                    placeholder="Ex: 50"
+                    value={replenishQty}
+                    onChange={(e) => setReplenishQty(e.target.value)}
+                    className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-indigo-500 outline-none text-xs font-bold"
+                  />
                 </div>
-              )}
 
-              <div className="flex gap-3 justify-end pt-2">
+                <div>
+                  <label className="block text-xs font-black uppercase tracking-wider text-slate-600 mb-1">
+                    Prix d'achat unitaire ({storeSettings?.currency || 'DT'})
+                  </label>
+                  <input
+                    type="number"
+                    step="0.001"
+                    required
+                    min="0.001"
+                    placeholder="Ex: 2.500"
+                    value={replenishPrice}
+                    onChange={(e) => setReplenishPrice(e.target.value)}
+                    className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-indigo-500 outline-none text-xs font-bold font-mono"
+                  />
+                </div>
+
+                {replenishQty && replenishPrice && (
+                  <div className="p-3.5 bg-slate-50 border border-slate-100 rounded-xl space-y-1 my-2">
+                    <div className="flex justify-between text-xs text-slate-500 font-medium">
+                      <span>Quantité :</span>
+                      <span className="font-bold text-slate-700">{replenishQty}</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-slate-500 font-medium">
+                      <span>Prix unitaire :</span>
+                      <span className="font-bold text-slate-700">{parseFloat(replenishPrice).toFixed(3)} {storeSettings?.currency || 'DT'}</span>
+                    </div>
+                    <div className="border-t border-slate-200/50 my-1.5 pt-1.5 flex justify-between text-xs font-bold text-slate-800">
+                      <span>Dépense totale estimée :</span>
+                      <span className="text-emerald-700 font-black">
+                        {(parseInt(replenishQty) * parseFloat(replenishPrice)).toFixed(3)} {storeSettings?.currency || 'DT'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex-shrink-0 border-t border-slate-100 p-4 bg-slate-50/70 flex gap-3 justify-end pb-[calc(1rem+env(safe-area-inset-bottom,0px))] animate-in fade-in duration-200">
                 <button
                   type="button"
                   onClick={() => setReplenishProduct(null)}

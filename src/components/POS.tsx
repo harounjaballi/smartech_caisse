@@ -38,6 +38,7 @@ export default function POS({ userProfile }: POSProps) {
   const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
   const [scannerActive, setScannerActive] = useState(true);
   const [scanNotification, setScanNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [manualCode, setManualCode] = useState('');
 
   const handlePrint = () => {
     console.log('Impression du ticket en cours...', lastInvoice);
@@ -545,9 +546,11 @@ export default function POS({ userProfile }: POSProps) {
                   <input
                     type="text"
                     placeholder="Saisie manuelle ou scan douchette direct ici..."
+                    value={manualCode}
+                    onChange={(e) => setManualCode(decodeAzertyBarcode(e.target.value))}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
-                        const code = e.currentTarget.value.trim();
+                        const code = manualCode.trim();
                         if (code !== '') {
                           const matchedProduct = products.find(p => p.barcode === code);
                           if (matchedProduct) {
@@ -572,7 +575,7 @@ export default function POS({ userProfile }: POSProps) {
                             });
                             playBeep('error');
                           }
-                          e.currentTarget.value = '';
+                          setManualCode('');
                         }
                         e.preventDefault();
                         e.stopPropagation();

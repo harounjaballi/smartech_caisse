@@ -804,7 +804,7 @@ export default function Users({ userProfile }: UsersProps) {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {MENU_OPTIONS.filter((menu) => {
-                    if (roleInput === 'user' && (menu.id === 'users' || menu.id === 'settings')) return false;
+                    if (roleInput === 'user' && menu.id === 'users') return false;
                     return true;
                   }).map((menu) => {
                     const isChecked = selectedMenus.includes(menu.id);
@@ -945,7 +945,7 @@ export default function Users({ userProfile }: UsersProps) {
                     const newRole = e.target.value as 'admin' | 'user';
                     setEditRole(newRole);
                     if (newRole === 'user') {
-                      setEditSelectedMenus((prev) => prev.filter((mid) => mid !== 'users' && mid !== 'settings'));
+                      setEditSelectedMenus((prev) => prev.filter((mid) => mid !== 'users'));
                     } else if (newRole === 'admin') {
                       setEditSelectedMenus(MENU_OPTIONS.map((m) => m.id));
                     }
@@ -979,7 +979,7 @@ export default function Users({ userProfile }: UsersProps) {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {MENU_OPTIONS.filter((menu) => {
-                    if (editRole === 'user' && (menu.id === 'users' || menu.id === 'settings')) return false;
+                    if (editRole === 'user' && menu.id === 'users') return false;
                     return true;
                   }).map((menu) => {
                     const isChecked = editSelectedMenus.includes(menu.id);

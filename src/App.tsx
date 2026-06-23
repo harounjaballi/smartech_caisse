@@ -150,11 +150,21 @@ export function hasMenuAccess(userProfile: UserProfile | null, menuId: string): 
   if (!userProfile) return false;
   
   // Custom permissions. Default standard and admin arrays if not present.
-  const allowed = userProfile.allowedMenus || (
+  let allowed = userProfile.allowedMenus || (
     userProfile.role === 'admin' 
       ? ['dashboard', 'pos', 'products', 'clients', 'sales', 'invoices', 'notes', 'users', 'settings']
       : ['dashboard', 'pos', 'products', 'clients', 'sales', 'invoices', 'notes']
   );
+
+  // Backward compatibility: make sure existing admins always have settings and users rights
+  if (userProfile.role === 'admin') {
+    if (!allowed.includes('settings')) {
+      allowed = [...allowed, 'settings'];
+    }
+    if (!allowed.includes('users')) {
+      allowed = [...allowed, 'users'];
+    }
+  }
   
   // Admin-only failsafe for user manager menu
   if (menuId === 'users' && userProfile.role !== 'admin') return false;

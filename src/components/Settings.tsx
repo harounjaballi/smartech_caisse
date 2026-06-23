@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { doc, onSnapshot, setDoc, collection, getDocs, query, where, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { StoreSettings, UserProfile } from '../types';
-import { handleFirestoreError, OperationType } from '../App';
+import { handleFirestoreError, OperationType, hasMenuAccess } from '../App';
 import { Edit2, X, Settings as SettingsIcon, CheckCircle2, Store, Save, Download, Trash2, Database, AlertTriangle, Calendar } from 'lucide-react';
 import { cn } from '../lib/utils';
 import * as XLSX from 'xlsx';
@@ -17,6 +17,20 @@ export default function Settings({ userProfile }: SettingsProps) {
   const [success, setSuccess] = useState<string | null>(null);
 
   const ownerId = userProfile?.ownerId || (userProfile?.role === 'admin' ? userProfile.uid : 'admin_fallback');
+
+  if (userProfile && !hasMenuAccess(userProfile, 'settings')) {
+    return (
+      <div className="max-w-4xl mx-auto mt-8 p-8 bg-white rounded-2xl shadow-sm border border-red-100 flex flex-col items-center text-center animate-in fade-in zoom-in-95 duration-200">
+        <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-4">
+          <AlertTriangle className="w-8 h-8" />
+        </div>
+        <h2 className="text-xl font-bold text-gray-900">Accès Refusé</h2>
+        <p className="text-sm text-gray-400 mt-2 max-w-sm">
+          Vous n'avez pas la permission d'accéder aux paramètres de la boutique. Veuillez contacter un administrateur pour modifier vos droits.
+        </p>
+      </div>
+    );
+  }
 
   // Form state for store settings - always editable now
   const [storeFormData, setStoreFormData] = useState({
