@@ -20,10 +20,13 @@ import {
   StickyNote,
   Bell,
   Calendar,
-  CheckCircle
+  CheckCircle,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { UserProfile, Note } from './types';
+import { getPendingOperations, syncPendingOperations } from './lib/offlineManager';
 
 // Components
 import Dashboard from './components/Dashboard';
@@ -156,11 +159,8 @@ export function hasMenuAccess(userProfile: UserProfile | null, menuId: string): 
       : ['dashboard', 'pos', 'products', 'clients', 'sales', 'invoices', 'notes']
   );
 
-  // Backward compatibility: make sure existing admins always have settings and users rights
+  // Backward compatibility: make sure existing admins always have users rights, but settings permission is controlled independently
   if (userProfile.role === 'admin') {
-    if (!allowed.includes('settings')) {
-      allowed = [...allowed, 'settings'];
-    }
     if (!allowed.includes('users')) {
       allowed = [...allowed, 'users'];
     }
@@ -282,6 +282,61 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [todayNotes, setTodayNotes] = useState<Note[]>([]);
   const [showNotesPopover, setShowNotesPopover] = useState(false);
+
+  // Offline status & synchronization states
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Initial pending count
+    setPendingCount(getPendingOperations().length);
+
+    const handleConnectionChange = () => {
+      const online = navigator.onLine;
+      setIsOnline(online);
+      if (online) {
+        handleTriggerSync();
+      }
+    };
+
+    const handleQueueChange = () => {
+      setPendingCount(getPendingOperations().length);
+    };
+
+    window.addEventListener('online', handleConnectionChange);
+    window.addEventListener('offline', handleConnectionChange);
+    window.addEventListener('offline-operations-changed', handleQueueChange);
+
+    // Initial check and auto-sync if online on mount
+    if (navigator.onLine) {
+      handleTriggerSync();
+    }
+
+    return () => {
+      window.removeEventListener('online', handleConnectionChange);
+      window.removeEventListener('offline', handleConnectionChange);
+      window.removeEventListener('offline-operations-changed', handleQueueChange);
+    };
+  }, [userProfile]);
+
+  const handleTriggerSync = async () => {
+    if (!navigator.onLine || !userProfile) return;
+    setSyncing(true);
+    setSyncError(null);
+    try {
+      const result = await syncPendingOperations(userProfile);
+      if (!result.success && result.errors.length > 0) {
+        setSyncError(result.errors.join(' | '));
+      }
+    } catch (e) {
+      console.error('Error in synchronization cycle:', e);
+    } finally {
+      setSyncing(false);
+      setPendingCount(getPendingOperations().length);
+    }
+  };
 
   // Dynamic formatted human date in French
   const getFormattedDate = () => {
@@ -481,6 +536,38 @@ export default function App() {
               >
                 <Menu className="w-5 h-5" />
               </button>
+
+              {/* Online/Offline Status Indicator */}
+              <div className="flex items-center gap-2">
+                {isOnline ? (
+                  <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-50 border border-emerald-200 rounded-xl text-[10px] font-black uppercase tracking-wider text-emerald-700 font-mono animate-in fade-in duration-300">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    <span className="hidden sm:inline">En ligne</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-rose-50 border border-rose-200 rounded-xl text-[10px] font-black uppercase tracking-wider text-rose-700 font-mono animate-pulse">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500 mr-0.5 animate-ping" />
+                    <span>Hors ligne</span>
+                  </div>
+                )}
+
+                {pendingCount > 0 && (
+                  <button
+                    onClick={handleTriggerSync}
+                    disabled={syncing || !isOnline}
+                    className={cn(
+                      "flex items-center gap-1.5 px-3 py-1.5 border rounded-xl text-[10px] font-black uppercase tracking-wider transition-all",
+                      isOnline
+                        ? "bg-amber-50 hover:bg-amber-100 border-amber-200 text-amber-800 shadow-3xs cursor-pointer"
+                        : "bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed"
+                    )}
+                    title={isOnline ? "Des opérations sont en attente de synchronisation. Cliquez pour synchroniser." : "Les opérations seront synchronisées dès le retour de la connexion."}
+                  >
+                    <RefreshCcw className={cn("w-3.5 h-3.5 text-amber-600", syncing && "animate-spin")} />
+                    <span>{pendingCount} en attente</span>
+                  </button>
+                )}
+              </div>
               
               {/* Interactive Date & Notes Notification Badge widget */}
               <div className="flex items-center gap-2 lg:gap-3.5 ml-2 sm:ml-4 relative" onClick={(e) => e.stopPropagation()}>

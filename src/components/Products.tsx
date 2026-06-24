@@ -5,6 +5,7 @@ import { Product, Category, StoreSettings, UserProfile } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
 import { Plus, Search, Edit2, Trash2, X, AlertTriangle, Package, Tag, Barcode } from 'lucide-react';
 import { cn, decodeAzertyBarcode } from '../lib/utils';
+import { addPendingOperation } from '../lib/offlineManager';
 
 interface ProductsProps {
   userProfile: UserProfile | null;
@@ -292,15 +293,15 @@ export default function Products({ userProfile }: ProductsProps) {
       if (qty <= 0) return;
 
       const newStock = (replenishProduct.stock || 0) + qty;
+      const expenseAmount = qty * price;
       
-      // Update product stock and buy price
+      // Update product stock and buy price (works locally offline via Firestore cache)
       await updateDoc(doc(db, 'products', replenishProduct.id), {
         stock: newStock,
         buyPrice: price
       });
 
       // Log supply entry
-      const expenseAmount = qty * price;
       await addDoc(collection(db, 'supplies'), {
         productId: replenishProduct.id,
         productName: replenishProduct.name,
@@ -310,6 +311,17 @@ export default function Products({ userProfile }: ProductsProps) {
         date: new Date(),
         ownerId
       });
+
+      // Track in custom offline queue if offline to count pending operations
+      if (!navigator.onLine) {
+        addPendingOperation('REPLENISH_STOCK', {
+          productId: replenishProduct.id,
+          qty,
+          price,
+          expenseAmount,
+          productName: replenishProduct.name
+        });
+      }
 
       console.log(`[DEBUG LOG] Approvisionnement effectué pour "${replenishProduct.name}":`, {
         productId: replenishProduct.id,

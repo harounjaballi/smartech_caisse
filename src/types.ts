@@ -45,6 +45,7 @@ export interface Sale {
   paid: number;
   debt: number;
   tva: number;
+  discount?: number;
   invoiceId?: string;
   items: SaleItem[];
   ownerId?: string;
@@ -63,6 +64,7 @@ export interface Invoice {
   paid: number;
   debt: number;
   tva: number;
+  discount?: number;
   date: any;
   items: SaleItem[];
   ownerId?: string;

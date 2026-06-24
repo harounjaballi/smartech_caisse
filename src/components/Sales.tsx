@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, orderBy, limit, doc, getDoc, where } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, limit, doc, getDoc, where, deleteDoc, setDoc, updateDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Sale, Invoice, UserProfile } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
-import { Search, Calendar, User, ShoppingBag, Eye, X, Printer, Download, TrendingUp, Receipt, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
+import { Search, Calendar, User, ShoppingBag, Eye, X, Printer, Download, TrendingUp, Receipt, AlertCircle, CheckCircle2, Clock, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { cn } from '../lib/utils';
+import { addPendingOperation } from '../lib/offlineManager';
 
 interface SalesProps {
   userProfile: UserProfile | null;
@@ -19,7 +20,145 @@ export default function Sales({ userProfile }: SalesProps) {
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
   const [filterStatus, setFilterStatus] = useState<'all' | 'paid' | 'partial'>('all');
 
+  // Deletion states
+  const [saleToDelete, setSaleToDelete] = useState<Sale | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   const ownerId = userProfile?.ownerId || (userProfile?.role === 'admin' ? userProfile.uid : 'admin_fallback');
+
+  const handleDeleteConfirm = async () => {
+    if (!saleToDelete) return;
+    setDeleting(true);
+    
+    const isOffline = !navigator.onLine;
+    const userEmail = userProfile?.email || 'unknown';
+    const userName = userProfile?.name || 'unknown';
+
+    try {
+      if (isOffline) {
+        // --- OFFLINE DELETE FLOW ---
+        // 1. Revert stock locally
+        for (const item of saleToDelete.items) {
+          const productRef = doc(db, 'products', item.productId);
+          const productSnap = await getDoc(productRef);
+          if (productSnap.exists()) {
+            const currentStock = productSnap.data().stock || 0;
+            await updateDoc(productRef, { stock: currentStock + item.quantity });
+          }
+        }
+
+        // 2. Revert client debt locally
+        if (saleToDelete.clientId && saleToDelete.debt > 0) {
+          const clientRef = doc(db, 'clients', saleToDelete.clientId);
+          const clientSnap = await getDoc(clientRef);
+          if (clientSnap.exists()) {
+            const currentDebt = clientSnap.data().debt || 0;
+            await updateDoc(clientRef, { debt: Math.max(0, currentDebt - saleToDelete.debt) });
+          }
+        }
+
+        // 3. Delete invoice locally
+        let invoiceNumber = 'N/A';
+        if (saleToDelete.invoiceId) {
+          const invoiceRef = doc(db, 'invoices', saleToDelete.invoiceId);
+          const invoiceSnap = await getDoc(invoiceRef);
+          if (invoiceSnap.exists()) {
+            invoiceNumber = invoiceSnap.data().number || 'N/A';
+          }
+          await deleteDoc(doc(db, 'invoices', saleToDelete.invoiceId));
+        }
+
+        // 4. Create Audit Log locally
+        const logRef = doc(collection(db, 'audit_logs'));
+        await setDoc(logRef, {
+          action: 'DELETE_SALE',
+          userEmail,
+          userName,
+          timestamp: new Date().toISOString(),
+          ticketId: saleToDelete.id,
+          invoiceId: saleToDelete.invoiceId || 'N/A',
+          invoiceNumber,
+          total: saleToDelete.total,
+          ownerId
+        });
+
+        // 5. Delete sale locally
+        await deleteDoc(doc(db, 'sales', saleToDelete.id));
+
+        // 6. Queue offline sync
+        addPendingOperation('DELETE_SALE', {
+          saleId: saleToDelete.id,
+          userEmail,
+          userName
+        });
+
+        console.log('[SALES OFFLINE] Sale deleted and queued successfully!');
+
+      } else {
+        // --- ONLINE DELETE FLOW ---
+        await runTransaction(db, async (transaction) => {
+          const saleRef = doc(db, 'sales', saleToDelete.id);
+          const saleSnap = await transaction.get(saleRef);
+          if (!saleSnap.exists()) throw new Error("Cette vente n'existe plus.");
+
+          // Revert stock
+          for (const item of saleToDelete.items) {
+            const productRef = doc(db, 'products', item.productId);
+            const productSnap = await transaction.get(productRef);
+            if (productSnap.exists()) {
+              const currentStock = productSnap.data().stock || 0;
+              transaction.update(productRef, { stock: currentStock + item.quantity });
+            }
+          }
+
+          // Revert client debt
+          if (saleToDelete.clientId && saleToDelete.debt > 0) {
+            const clientRef = doc(db, 'clients', saleToDelete.clientId);
+            const clientSnap = await transaction.get(clientRef);
+            if (clientSnap.exists()) {
+              const currentDebt = clientSnap.data().debt || 0;
+              transaction.update(clientRef, { debt: Math.max(0, currentDebt - saleToDelete.debt) });
+            }
+          }
+
+          // Read and delete invoice
+          let invoiceNumber = 'N/A';
+          if (saleToDelete.invoiceId) {
+            const invoiceRef = doc(db, 'invoices', saleToDelete.invoiceId);
+            const invoiceSnap = await transaction.get(invoiceRef);
+            if (invoiceSnap.exists()) {
+              invoiceNumber = invoiceSnap.data().number || 'N/A';
+            }
+            transaction.delete(invoiceRef);
+          }
+
+          // Write audit log
+          const logRef = doc(collection(db, 'audit_logs'));
+          transaction.set(logRef, {
+            action: 'DELETE_SALE',
+            userEmail,
+            userName,
+            timestamp: serverTimestamp(),
+            ticketId: saleToDelete.id,
+            invoiceId: saleToDelete.invoiceId || 'N/A',
+            invoiceNumber,
+            total: saleToDelete.total,
+            ownerId
+          });
+
+          // Delete sale
+          transaction.delete(saleRef);
+        });
+      }
+
+      setSaleToDelete(null);
+    } catch (err: any) {
+      console.error("Failed to delete sale:", err);
+      alert("Erreur lors de la suppression de la vente: " + err.message);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const downloadPDF = async (sale: Sale) => {
     try {
@@ -256,13 +395,25 @@ export default function Sales({ userProfile }: SalesProps) {
                       )}
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setSelectedSale(sale); }}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                        Voir
-                      </button>
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setSelectedSale(sale); }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          Voir
+                        </button>
+
+                        {userProfile?.role === 'admin' && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setSaleToDelete(sale); }}
+                            className="inline-flex items-center gap-1.5 p-1.5 text-[10px] font-black uppercase tracking-wider text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                            title="Supprimer cette vente"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -393,6 +544,52 @@ export default function Sales({ userProfile }: SalesProps) {
               >
                 <Printer className="w-4 h-4" />
                 Imprimer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sale Delete Confirmation Modal */}
+      {saleToDelete && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-slate-100 p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 bg-red-50 text-red-600 rounded-xl">
+                <AlertCircle className="w-6 h-6 animate-pulse" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider">Supprimer la vente ?</h3>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Êtes-vous sûr de vouloir supprimer définitivement la vente <strong className="text-slate-800">#{saleToDelete.id.slice(0, 8)}...</strong> d'un montant de <strong className="text-slate-800">{saleToDelete.total.toFixed(3)} DT</strong> ?
+                </p>
+                <p className="text-[10px] text-red-600 font-extrabold leading-normal bg-red-50/50 p-2 rounded-lg border border-red-100/50 mt-1">
+                  Cette opération va restaurer automatiquement les stocks, recalculer les rapports financiers, et soustraire la dette associée à ce client.
+                </p>
+              </div>
+            </div>
+            
+            <div className="flex gap-3 justify-end pt-2">
+              <button
+                disabled={deleting}
+                onClick={() => setSaleToDelete(null)}
+                className="px-4 py-2 bg-slate-50 hover:bg-slate-100 text-slate-500 hover:text-slate-700 text-xs font-bold rounded-xl transition-all border border-slate-100 cursor-pointer disabled:opacity-50"
+              >
+                Annuler
+              </button>
+              <button
+                disabled={deleting}
+                onClick={handleDeleteConfirm}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-black rounded-xl transition-all shadow-md shadow-red-600/10 cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {deleting ? (
+                  <>
+                    <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Suppression...</span>
+                  </>
+                ) : (
+                  <span>Confirmer</span>
+                )}
               </button>
             </div>
           </div>

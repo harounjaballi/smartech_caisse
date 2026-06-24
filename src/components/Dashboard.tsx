@@ -27,14 +27,17 @@ import {
   ChevronRight,
   Edit2,
   Trash2,
-  PackagePlus
+  PackagePlus,
+  BarChart3,
+  Percent,
+  Sparkles
 } from 'lucide-react';
 import { isSameDay } from 'date-fns';
 import { cn } from '../lib/utils';
 
 // Helper component for printing high-quality A4 reports
 interface PrintableReportProps {
-  activeModal: 'revenue' | 'profit' | 'debt' | 'sales';
+  activeModal: 'revenue' | 'profit' | 'debt' | 'sales' | 'expenses' | 'stock';
   records: any[];
   storeSettings: StoreSettings | null;
   currency: string;
@@ -44,6 +47,7 @@ function PrintableReport({ activeModal, records, storeSettings, currency }: Prin
   const title = activeModal === 'revenue' ? "RAPPORT D'ACTIVITÉ : CHIFFRE D'AFFAIRES"
     : activeModal === 'profit' ? "RAPPORT D'ACTIVITÉ : BÉNÉFICE NET (PERFORMANCE)"
     : activeModal === 'debt' ? "RAPPORT DE TRÉSORERIE : DETTES CLIENTS"
+    : activeModal === 'stock' ? "RAPPORT D'INVENTAIRE : VALORISATION DE STOCK"
     : "RAPPORT D'ACTIVITÉ : CRÉATIONS DE BILLETS / TRANSACTIONS";
 
   const printedDate = new Date().toLocaleDateString('fr-FR', {
@@ -75,7 +79,19 @@ function PrintableReport({ activeModal, records, storeSettings, currency }: Prin
       <table className="w-full border-collapse text-left border border-stone-300 mt-4 text-[11px]">
         <thead>
           <tr className="bg-stone-50 uppercase font-black text-stone-700 border-b border-stone-300">
-            <th className="py-2 px-3 border border-stone-200">Date de l'Activité</th>
+            {activeModal === 'stock' ? (
+              <>
+                <th className="py-2 px-3 border border-stone-200">Désignation</th>
+                <th className="py-2 px-3 text-center border border-stone-200">Stock Dispo</th>
+                <th className="py-2 px-3 text-right border border-stone-200">P.A. Unit</th>
+                <th className="py-2 px-3 text-right border border-stone-200">P.V. Unit</th>
+                <th className="py-2 px-3 text-right border border-stone-200">Total Achat</th>
+                <th className="py-2 px-3 text-right border border-stone-200 bg-stone-100 font-bold">Total Vente (Revenus)</th>
+                <th className="py-2 px-3 text-right border border-stone-200 font-bold">Marge Théorique</th>
+              </>
+            ) : (
+              <th className="py-2 px-3 border border-stone-200">Date de l'Activité</th>
+            )}
             {activeModal === 'revenue' && (
               <>
                 <th className="py-2 px-3 text-center border border-stone-200">Nb de Ventes</th>
@@ -110,7 +126,25 @@ function PrintableReport({ activeModal, records, storeSettings, currency }: Prin
           </tr>
         </thead>
         <tbody className="divide-y divide-stone-200">
-          {records.map((rec) => {
+          {records.map((rec, idx) => {
+            if (activeModal === 'stock') {
+              const stock = rec.stock || 0;
+              const buyVal = stock * (rec.buyPrice || 0);
+              const sellVal = stock * (rec.sellPrice || 0);
+              const margin = sellVal - buyVal;
+              return (
+                <tr key={rec.id || idx} className="hover:bg-stone-50/20">
+                  <td className="py-2 px-3 font-semibold border border-stone-200">{rec.name}</td>
+                  <td className="py-2 px-3 text-center border border-stone-200">{stock}</td>
+                  <td className="py-2 px-3 text-right border border-stone-200 font-mono">{(rec.buyPrice || 0).toFixed(3)} {currency}</td>
+                  <td className="py-2 px-3 text-right border border-stone-200 font-mono">{(rec.sellPrice || 0).toFixed(3)} {currency}</td>
+                  <td className="py-2 px-3 text-right border border-stone-200 font-mono">{buyVal.toFixed(3)} {currency}</td>
+                  <td className="py-2 px-3 text-right border border-stone-200 bg-stone-50 font-mono font-bold">{sellVal.toFixed(3)} {currency}</td>
+                  <td className="py-2 px-3 text-right border border-stone-200 font-mono font-bold">{margin.toFixed(3)} {currency}</td>
+                </tr>
+              );
+            }
+
             const dateLabel = rec.dateObj.toLocaleDateString('fr-FR', {
               weekday: 'short',
               day: '2-digit',
@@ -179,7 +213,7 @@ export default function Dashboard({ userProfile }: DashboardProps) {
   const [loading, setLoading] = useState(true);
 
   // States for detailed history modal
-  const [activeModal, setActiveModal] = useState<'revenue' | 'profit' | 'debt' | 'sales' | 'expenses' | null>(null);
+  const [activeModal, setActiveModal] = useState<'revenue' | 'profit' | 'debt' | 'sales' | 'expenses' | 'stock' | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [periodFilter, setPeriodFilter] = useState<'7' | '30' | '90' | '100' | 'all' | 'custom'>('100');
   const [startDate, setStartDate] = useState('');
@@ -532,17 +566,118 @@ export default function Dashboard({ userProfile }: DashboardProps) {
     return result;
   }, [dailyRecords, searchQuery, periodFilter, startDate, endDate, sortField, sortAsc, activeModal]);
 
+  // Remaining Stock valuation and profit margins calculations - automatically refreshed in real-time
+  const stockValuation = useMemo(() => {
+    let totalItemsCount = 0;
+    let totalStockQty = 0;
+    let totalBuyValue = 0;
+    let totalSellValue = 0; // Estimated revenues
+    
+    products.forEach(p => {
+      const stock = p.stock || 0;
+      totalItemsCount += 1;
+      totalStockQty += stock;
+      totalBuyValue += stock * (p.buyPrice || 0);
+      totalSellValue += stock * (p.sellPrice || 0);
+    });
+    
+    const theoreticalMargin = totalSellValue - totalBuyValue;
+    const marginRatio = totalSellValue > 0 ? (theoreticalMargin / totalSellValue) * 100 : 0;
+    
+    return {
+      totalItemsCount,
+      totalStockQty,
+      totalBuyValue,
+      totalSellValue,
+      theoreticalMargin,
+      marginRatio
+    };
+  }, [products]);
+
+  const filteredAndSortedProducts = useMemo(() => {
+    if (activeModal !== 'stock') return [];
+    let result = [...products];
+
+    // 1. Searching by Product Name or Barcode or Category
+    if (searchQuery.trim() !== '') {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(p => 
+        (p.name || '').toLowerCase().includes(q) ||
+        (p.barcode || '').toLowerCase().includes(q) ||
+        (p.category || '').toLowerCase().includes(q)
+      );
+    }
+
+    // 2. Sorting
+    result.sort((a, b) => {
+      let comparison = 0;
+      if (sortField === 'date') {
+        // Sort by name for 'date' field in stock modal context
+        comparison = (a.name || '').localeCompare(b.name || '');
+      } else {
+        // Sort by total stock valuation (sell price) or stock level
+        const stockValA = (a.stock || 0) * (a.sellPrice || 0);
+        const stockValB = (b.stock || 0) * (b.sellPrice || 0);
+        comparison = stockValA - stockValB;
+      }
+      return sortAsc ? comparison : -comparison;
+    });
+
+    return result;
+  }, [products, searchQuery, sortField, sortAsc, activeModal]);
+
   // Paginated records list
   const paginatedRecords = useMemo(() => {
     const startIdx = (currentPage - 1) * itemsPerPage;
+    if (activeModal === 'stock') {
+      return filteredAndSortedProducts.slice(startIdx, startIdx + itemsPerPage);
+    }
     return filteredAndSortedRecords.slice(startIdx, startIdx + itemsPerPage);
-  }, [filteredAndSortedRecords, currentPage]);
+  }, [filteredAndSortedRecords, filteredAndSortedProducts, currentPage, activeModal]);
 
-  const totalPages = Math.ceil(filteredAndSortedRecords.length / itemsPerPage);
+  const totalPages = useMemo(() => {
+    if (activeModal === 'stock') {
+      return Math.ceil(filteredAndSortedProducts.length / itemsPerPage);
+    }
+    return Math.ceil(filteredAndSortedRecords.length / itemsPerPage);
+  }, [filteredAndSortedRecords, filteredAndSortedProducts, activeModal]);
 
   // Excel (.xlsx) sheets generator
   const handleExportHistory = () => {
     try {
+      if (activeModal === 'stock') {
+        if (filteredAndSortedProducts.length === 0) {
+          alert("Aucun enregistrement à exporter.");
+          return;
+        }
+
+        const rows = filteredAndSortedProducts.map(p => {
+          const stock = p.stock || 0;
+          const buyValue = stock * (p.buyPrice || 0);
+          const sellValue = stock * (p.sellPrice || 0);
+          const theoreticalMargin = sellValue - buyValue;
+          const ratio = sellValue > 0 ? ((theoreticalMargin / sellValue) * 100).toFixed(1) + '%' : '0.0%';
+          return {
+            'Désignation du Produit': p.name || '',
+            'Code barre': p.barcode || 'Sans codebarre',
+            'Catégorie': p.category || 'Général',
+            'Quantité en stock': stock,
+            'Prix d\'achat unitaire (DT)': (p.buyPrice || 0).toFixed(3),
+            'Prix de vente unitaire (DT)': (p.sellPrice || 0).toFixed(3),
+            'Valeur d\'achat totale (DT)': buyValue.toFixed(3),
+            'Valeur de vente totale (Revenus) (DT)': sellValue.toFixed(3),
+            'Marge théorique estimée (DT)': theoreticalMargin.toFixed(3),
+            'Ratio Marge (%)': ratio
+          };
+        });
+
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Valorisation Stock');
+        XLSX.writeFile(wb, `Rapport_Valorisation_Stock_${new Date().toISOString().split('T')[0]}.xlsx`);
+        return;
+      }
+
       if (filteredAndSortedRecords.length === 0) {
         alert("Aucun enregistrement à exporter.");
         return;
@@ -601,7 +736,7 @@ export default function Dashboard({ userProfile }: DashboardProps) {
     }
   };
 
-  const openHistoryModal = (type: 'revenue' | 'profit' | 'debt' | 'sales' | 'expenses') => {
+  const openHistoryModal = (type: 'revenue' | 'profit' | 'debt' | 'sales' | 'expenses' | 'stock') => {
     setActiveModal(type);
     setSearchQuery('');
     setPeriodFilter('100'); // Default to 100 days as requested
@@ -884,6 +1019,86 @@ export default function Dashboard({ userProfile }: DashboardProps) {
         </div>
       </div>
 
+      {/* SECTION: VALORISATION & PERFORMANCE DU STOCK RESTANT */}
+      <div className="bg-white rounded-3xl border border-slate-150 shadow-xs p-6 font-sans">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5 pb-4 border-b border-slate-100">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse"></span>
+              <h2 className="text-sm font-black uppercase text-slate-800 tracking-wider">Valorisation & Performance du Stock Restant</h2>
+            </div>
+            <p className="text-[11px] text-slate-450 font-semibold uppercase mt-0.5">Calculé automatiquement en temps réel à chaque modification de prix ou de stock</p>
+          </div>
+          <button
+            onClick={() => openHistoryModal('stock')}
+            className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-md shadow-indigo-600/10 active:scale-[0.98] cursor-pointer flex items-center gap-1.5 self-start sm:self-auto"
+          >
+            <BarChart3 className="w-4 h-4" />
+            Consulter le Rapport d'Inventaire
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          
+          {/* Card: Valeur d'Achat du Stock */}
+          <div className="bg-slate-50/70 rounded-2xl p-4 border border-slate-100 flex items-center gap-4 hover:bg-slate-50 transition-colors">
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 shadow-xs">
+              <Coins className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <span className="text-[10px] font-black uppercase text-slate-450 tracking-wider block">Valeur d'Achat Totale</span>
+              <span className="text-base font-black text-slate-800 font-mono block mt-0.5">
+                {stockValuation.totalBuyValue.toFixed(3)} <span className="text-xs text-slate-500">{currency}</span>
+              </span>
+              <span className="text-[10px] text-slate-400 font-bold uppercase block mt-0.5">Investi dans les marchandises</span>
+            </div>
+          </div>
+
+          {/* Card: Revenus Potentiels Estimés (Valeur de vente) */}
+          <div className="bg-slate-50/70 rounded-2xl p-4 border border-slate-100 flex items-center gap-4 hover:bg-slate-50 transition-colors">
+            <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 shadow-xs">
+              <TrendingUp className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <span className="text-[10px] font-black uppercase text-slate-450 tracking-wider block">Revenus Potentiels Estimés</span>
+              <span className="text-base font-black text-slate-800 font-mono block mt-0.5">
+                {stockValuation.totalSellValue.toFixed(3)} <span className="text-xs text-slate-500">{currency}</span>
+              </span>
+              <span className="text-[10px] text-slate-400 font-bold uppercase block mt-0.5">Chiffre d'affaires estimé</span>
+            </div>
+          </div>
+
+          {/* Card: Marge Bénéficiaire Théorique */}
+          <div className="bg-slate-50/70 rounded-2xl p-4 border border-slate-100 flex items-center gap-4 hover:bg-slate-50 transition-colors">
+            <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center shrink-0 shadow-xs">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <span className="text-[10px] font-black uppercase text-slate-450 tracking-wider block">Bénéfice Théorique (Marge)</span>
+              <span className="text-base font-black text-slate-800 font-mono block mt-0.5">
+                {stockValuation.theoreticalMargin.toFixed(3)} <span className="text-xs text-slate-500">{currency}</span>
+              </span>
+              <span className="text-[10px] text-slate-400 font-bold uppercase block mt-0.5">Marge brute théorique</span>
+            </div>
+          </div>
+
+          {/* Card: Taux de Marge (%) */}
+          <div className="bg-slate-50/70 rounded-2xl p-4 border border-slate-100 flex items-center gap-4 hover:bg-slate-50 transition-colors">
+            <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0 shadow-xs">
+              <Percent className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <span className="text-[10px] font-black uppercase text-slate-450 tracking-wider block">Marge Commerciale Moyenne</span>
+              <span className="text-base font-black text-indigo-700 font-mono block mt-0.5">
+                {stockValuation.marginRatio.toFixed(1)}%
+              </span>
+              <span className="text-[10px] text-slate-400 font-bold uppercase block mt-0.5">Taux de profitabilité du stock</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
       {/* Main layout divided into 2 Columns (Table on left, stats sidebar on right) */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 border-t border-slate-100 pt-8">
         
@@ -1084,6 +1299,7 @@ export default function Dashboard({ userProfile }: DashboardProps) {
               activeModal === 'revenue' ? "bg-gradient-to-r from-blue-600 to-indigo-800" :
               activeModal === 'profit' ? "bg-gradient-to-r from-emerald-500 to-teal-750" :
               activeModal === 'debt' ? "bg-gradient-to-r from-rose-500 to-red-700" :
+              activeModal === 'stock' ? "bg-gradient-to-r from-indigo-600 via-indigo-700 to-slate-900" :
               "bg-gradient-to-r from-purple-500 to-violet-800"
             )}>
               <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-white/10 to-transparent"></div>
@@ -1093,6 +1309,7 @@ export default function Dashboard({ userProfile }: DashboardProps) {
                   {activeModal === 'profit' && <Coins className="w-5 h-5 text-emerald-50" />}
                   {activeModal === 'debt' && <AlertCircle className="w-5 h-5 text-rose-50" />}
                   {activeModal === 'sales' && <ShoppingCart className="w-5 h-5 text-purple-50" />}
+                  {activeModal === 'stock' && <Package className="w-5 h-5 text-indigo-50" />}
                 </div>
                 <div>
                   <h3 className="text-lg font-black tracking-tight leading-none">
@@ -1100,12 +1317,14 @@ export default function Dashboard({ userProfile }: DashboardProps) {
                     {activeModal === 'profit' && "Consulter l'Historique : Bénéfice Net"}
                     {activeModal === 'debt' && "Consulter l'Historique : Dettes"}
                     {activeModal === 'sales' && "Consulter l'Historique : Nombre de ventes"}
+                    {activeModal === 'stock' && "Rapport de Valorisation & Rentabilité du Stock"}
                   </h3>
                   <p className="text-[10px] uppercase font-bold tracking-wider text-white/70 mt-1">
                     {activeModal === 'revenue' && "Suivi de la courbe des ventes brutes"}
                     {activeModal === 'profit' && "Rendement financier après déduction du coût d'achat"}
                     {activeModal === 'debt' && "Encours clients et d'impayés du jour"}
                     {activeModal === 'sales' && "Intensité de l'activité du magasin"}
+                    {activeModal === 'stock' && "Analyse en temps réel de la valeur d'achat, de vente et des marges bénéficiaires de l'inventaire actuel"}
                   </p>
                 </div>
               </div>
@@ -1130,40 +1349,71 @@ export default function Dashboard({ userProfile }: DashboardProps) {
                     type="text"
                     value={searchQuery}
                     onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
-                    placeholder="Rechercher une date (ex: 22/06)..."
+                    placeholder={activeModal === 'stock' ? "Rechercher un produit, code barre..." : "Rechercher une date (ex: 22/06)..."}
                     className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all"
                   />
                 </div>
 
-                {/* Period Selection */}
-                <div className="md:col-span-8 flex flex-wrap items-center gap-2 md:justify-end">
-                  <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider mr-1">Filtre Période :</span>
-                  {(['7', '30', '90', '100', 'all', 'custom'] as const).map(p => {
-                    const label = p === '7' ? '7 jours' :
-                                  p === '30' ? '30 jours' :
-                                  p === '90' ? '90 jours' :
-                                  p === '100' ? '100 jours' :
-                                  p === 'all' ? 'Tout' : 'Personnalisée';
-                    return (
-                      <button
-                        key={p}
-                        onClick={() => { setPeriodFilter(p); setCurrentPage(1); }}
-                        className={cn(
-                          "px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer",
-                          periodFilter === p
-                            ? "bg-slate-900 text-white shadow-md shadow-slate-900/10"
-                            : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
-                        )}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
+                {/* Period Selection or Stock KPIs */}
+                {activeModal === 'stock' ? (
+                  <div className="md:col-span-8 flex flex-wrap items-center gap-4 md:justify-end">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 bg-white px-4 py-2.5 rounded-2xl border border-slate-100 shadow-xs text-[11px] font-bold text-slate-600">
+                      <div>
+                        <span>Articles : </span>
+                        <span className="text-slate-900 font-black font-mono">{stockValuation.totalItemsCount}</span>
+                      </div>
+                      <div className="hidden sm:block w-px h-3.5 bg-slate-150"></div>
+                      <div>
+                        <span>Stock Total : </span>
+                        <span className="text-slate-900 font-black font-mono">{stockValuation.totalStockQty}</span>
+                      </div>
+                      <div className="hidden sm:block w-px h-3.5 bg-slate-150"></div>
+                      <div>
+                        <span>Valeur d'Achat : </span>
+                        <span className="text-emerald-650 font-black font-mono">{stockValuation.totalBuyValue.toFixed(3)} {currency}</span>
+                      </div>
+                      <div className="hidden sm:block w-px h-3.5 bg-slate-150"></div>
+                      <div>
+                        <span>Revenus Est. : </span>
+                        <span className="text-indigo-600 font-black font-mono">{stockValuation.totalSellValue.toFixed(3)} {currency}</span>
+                      </div>
+                      <div className="hidden sm:block w-px h-3.5 bg-slate-150"></div>
+                      <div>
+                        <span>Marge Est. : </span>
+                        <span className="text-purple-650 font-black font-mono">{stockValuation.theoreticalMargin.toFixed(3)} {currency} ({stockValuation.marginRatio.toFixed(1)}%)</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="md:col-span-8 flex flex-wrap items-center gap-2 md:justify-end">
+                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider mr-1">Filtre Période :</span>
+                    {(['7', '30', '90', '100', 'all', 'custom'] as const).map(p => {
+                      const label = p === '7' ? '7 jours' :
+                                    p === '30' ? '30 jours' :
+                                    p === '90' ? '90 jours' :
+                                    p === '100' ? '100 jours' :
+                                    p === 'all' ? 'Tout' : 'Personnalisée';
+                      return (
+                        <button
+                          key={p}
+                          onClick={() => { setPeriodFilter(p); setCurrentPage(1); }}
+                          className={cn(
+                            "px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer",
+                            periodFilter === p
+                              ? "bg-slate-900 text-white shadow-md shadow-slate-900/10"
+                              : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+                          )}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Custom date range option */}
-              {periodFilter === 'custom' && (
+              {activeModal !== 'stock' && periodFilter === 'custom' && (
                 <div className="flex items-center gap-3 p-3 bg-white rounded-2xl border border-slate-100 shadow-xs max-w-lg animate-in slide-in-from-top-2 duration-200">
                   <div className="relative flex-1">
                     <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
@@ -1190,26 +1440,54 @@ export default function Dashboard({ userProfile }: DashboardProps) {
 
             {/* Modal Table Area (Scrollable body) */}
             <div className="flex-1 overflow-auto font-sans">
-              {filteredAndSortedRecords.length === 0 ? (
+              {((activeModal === 'stock' ? filteredAndSortedProducts.length : filteredAndSortedRecords.length) === 0) ? (
                 <div className="text-center py-24 px-4 flex flex-col items-center justify-center">
                   <Calendar className="w-12 h-12 text-slate-200 mb-3" />
                   <h4 className="text-xs font-black uppercase text-slate-400 tracking-wider">Aucune donnée trouvée</h4>
-                  <p className="text-slate-400 font-medium text-[11px] mt-1 max-w-xs">Ajustez la recherche ou la période pour visualiser d'autres dates.</p>
+                  <p className="text-slate-400 font-medium text-[11px] mt-1 max-w-xs">Ajustez la recherche pour visualiser d'autres articles ou données.</p>
                 </div>
               ) : (
                 <div className="p-6">
                   <table className="w-full border-collapse text-left text-xs">
                     <thead>
                       <tr className="border-b border-slate-150 text-[10px] font-black uppercase tracking-wider text-slate-450 bg-slate-50/70">
-                        <th 
-                          onClick={() => { setSortField('date'); setSortAsc(!sortAsc); }}
-                          className="px-6 py-3 cursor-pointer hover:bg-slate-150 transition-colors select-none"
-                        >
-                          <div className="flex items-center gap-1.5">
-                            Date de l'activité
-                            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
-                          </div>
-                        </th>
+                        {activeModal === 'stock' ? (
+                          <>
+                            <th 
+                              onClick={() => { setSortField('date'); setSortAsc(!sortAsc); }}
+                              className="px-6 py-3 cursor-pointer hover:bg-slate-150 transition-colors select-none"
+                            >
+                              <div className="flex items-center gap-1.5">
+                                Désignation du Produit
+                                <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                              </div>
+                            </th>
+                            <th className="px-6 py-3 text-center">Quantité en Stock</th>
+                            <th className="px-6 py-3 text-right">Prix d'Achat Unit.</th>
+                            <th className="px-6 py-3 text-right">Prix de Vente Unit.</th>
+                            <th className="px-6 py-3 text-right">Valeur d'Achat Totale</th>
+                            <th className="px-6 py-3 text-right">Valeur de Vente Totale (Revenus Est.)</th>
+                            <th 
+                              onClick={() => { setSortField('value'); setSortAsc(!sortAsc); }}
+                              className="px-6 py-3 cursor-pointer hover:bg-slate-155 transition-colors text-right select-none"
+                            >
+                              <div className="flex items-center gap-1.5 justify-end">
+                                Marge Bénéficiaire Théorique
+                                <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                              </div>
+                            </th>
+                          </>
+                        ) : (
+                          <th 
+                            onClick={() => { setSortField('date'); setSortAsc(!sortAsc); }}
+                            className="px-6 py-3 cursor-pointer hover:bg-slate-150 transition-colors select-none"
+                          >
+                            <div className="flex items-center gap-1.5">
+                              Date de l'activité
+                              <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                            </div>
+                          </th>
+                        )}
                         
                         {activeModal === 'revenue' && (
                           <>
@@ -1280,7 +1558,52 @@ export default function Dashboard({ userProfile }: DashboardProps) {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {paginatedRecords.map((rec) => {
+                      {paginatedRecords.map((rec, rIdx) => {
+                        if (activeModal === 'stock') {
+                          const product = rec as Product;
+                          const stock = product.stock || 0;
+                          const buyVal = stock * (product.buyPrice || 0);
+                          const sellVal = stock * (product.sellPrice || 0);
+                          const profitVal = sellVal - buyVal;
+                          return (
+                            <tr key={product.id || rIdx} className="hover:bg-slate-50/50 transition-colors">
+                              <td className="px-6 py-3.5 whitespace-nowrap">
+                                <div className="flex flex-col">
+                                  <span className="text-xs font-bold text-slate-700">{product.name}</span>
+                                  <span className="text-[10px] text-slate-450 font-mono">{product.barcode || 'Sans codebarre'}</span>
+                                </div>
+                              </td>
+                              <td className="px-6 py-3.5 text-center whitespace-nowrap">
+                                <span className={cn(
+                                  "px-2.5 py-1 rounded-xl text-xs font-black font-mono inline-block border",
+                                  stock === 0 ? "bg-red-50 text-red-700 border-red-100" :
+                                  stock <= (product.lowStockAlert || 5) ? "bg-rose-50 text-rose-700 border-rose-100" :
+                                  "bg-emerald-50 text-emerald-700 border-emerald-100"
+                                )}>
+                                  {stock} unités
+                                </span>
+                              </td>
+                              <td className="px-6 py-3.5 text-right font-semibold text-slate-500 font-mono">
+                                {(product.buyPrice || 0).toFixed(3)} {currency}
+                              </td>
+                              <td className="px-6 py-3.5 text-right font-bold text-slate-800 font-mono">
+                                {(product.sellPrice || 0).toFixed(3)} {currency}
+                              </td>
+                              <td className="px-6 py-3.5 text-right text-slate-500 font-mono">
+                                {buyVal.toFixed(3)} {currency}
+                              </td>
+                              <td className="px-6 py-3.5 text-right font-black text-slate-700 font-mono">
+                                {sellVal.toFixed(3)} {currency}
+                              </td>
+                              <td className="px-6 py-3.5 text-right whitespace-nowrap">
+                                <span className="px-3 py-1 bg-indigo-50 text-indigo-700 font-black font-mono rounded-lg border border-indigo-100 text-xs">
+                                  {profitVal.toFixed(3)} {currency}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        }
+
                         const formattedDate = rec.dateObj.toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
                         return (
                           <tr key={rec.dateStr} className="hover:bg-slate-50/50 transition-colors">
@@ -1382,7 +1705,9 @@ export default function Dashboard({ userProfile }: DashboardProps) {
                 </div>
               ) : (
                 <div className="text-xs font-bold text-slate-400 block uppercase">
-                  Total : {filteredAndSortedRecords.length} rapports de journée
+                  {activeModal === 'stock'
+                    ? `Total : ${filteredAndSortedProducts.length} articles répertoriés`
+                    : `Total : ${filteredAndSortedRecords.length} rapports de journée`}
                 </div>
               )}
 
@@ -1763,7 +2088,7 @@ export default function Dashboard({ userProfile }: DashboardProps) {
       {activeModal && activeModal !== 'expenses' && createPortal(
         <PrintableReport 
           activeModal={activeModal} 
-          records={filteredAndSortedRecords} 
+          records={activeModal === 'stock' ? filteredAndSortedProducts : filteredAndSortedRecords} 
           storeSettings={storeSettings} 
           currency={currency} 
         />,
