@@ -101,15 +101,17 @@ export default function Notes({ userProfile }: NotesProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!auth.currentUser) return;
+    if (!userProfile) return;
 
     try {
+      const activeUserId = userProfile?.uid || ownerId;
       if (editingNote) {
         await updateDoc(doc(db, 'notes', editingNote.id), {
           title: formData.title,
           content: formData.content,
           date: formData.date,
-          userId: auth.currentUser.uid
+          ownerId,
+          userId: activeUserId
         });
       } else {
         await addDoc(collection(db, 'notes'), {
@@ -117,8 +119,8 @@ export default function Notes({ userProfile }: NotesProps) {
           content: formData.content,
           date: formData.date,
           createdAt: serverTimestamp(),
-          userId: auth.currentUser?.uid || 'custom_user',
-          ownerId
+          ownerId,
+          userId: activeUserId
         });
       }
       closeModal();

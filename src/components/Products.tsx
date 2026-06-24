@@ -197,7 +197,9 @@ export default function Products({ userProfile }: ProductsProps) {
           await updateDoc(doc(db, 'supplies', d.id), {
             productName: pName,
             buyPrice: bPrice,
-            totalCost: tCost
+            totalCost: tCost,
+            ownerId,
+            userId: userProfile?.uid || ownerId
           });
         }
 
@@ -212,7 +214,8 @@ export default function Products({ userProfile }: ProductsProps) {
             buyPrice: formData.buyPrice,
             totalCost: expenseAmount,
             date: new Date(),
-            ownerId
+            ownerId,
+            userId: userProfile?.uid || ownerId
           });
           console.log(`[DEBUG LOG] Produit "Modifié" (Stock Augmenté) de ${editingProduct.name}:`, {
             productId: editingProduct.id,
@@ -232,7 +235,8 @@ export default function Products({ userProfile }: ProductsProps) {
             buyPrice: formData.buyPrice,
             totalCost: expenseAmount,
             date: new Date(),
-            ownerId
+            ownerId,
+            userId: userProfile?.uid || ownerId
           });
           console.log(`[DEBUG LOG] Produit "Modifié" (Stock Diminué) de ${editingProduct.name}:`, {
             productId: editingProduct.id,
@@ -249,9 +253,17 @@ export default function Products({ userProfile }: ProductsProps) {
           });
         }
 
-        await updateDoc(doc(db, 'products', editingProduct.id), formData);
+        await updateDoc(doc(db, 'products', editingProduct.id), {
+          ...formData,
+          ownerId,
+          userId: userProfile?.uid || ownerId
+        });
       } else {
-        const docRef = await addDoc(collection(db, 'products'), { ...formData, ownerId });
+        const docRef = await addDoc(collection(db, 'products'), {
+          ...formData,
+          ownerId,
+          userId: userProfile?.uid || ownerId
+        });
         const stockInt = parseInt(formData.stock.toString()) || 0;
         if (stockInt > 0) {
           const expenseAmount = stockInt * formData.buyPrice;
@@ -262,7 +274,8 @@ export default function Products({ userProfile }: ProductsProps) {
             buyPrice: formData.buyPrice,
             totalCost: expenseAmount,
             date: new Date(),
-            ownerId
+            ownerId,
+            userId: userProfile?.uid || ownerId
           });
           console.log(`[DEBUG LOG] Produit "Créé":`, {
             productId: docRef.id,
@@ -298,7 +311,9 @@ export default function Products({ userProfile }: ProductsProps) {
       // Update product stock and buy price (works locally offline via Firestore cache)
       await updateDoc(doc(db, 'products', replenishProduct.id), {
         stock: newStock,
-        buyPrice: price
+        buyPrice: price,
+        ownerId,
+        userId: userProfile?.uid || ownerId
       });
 
       // Log supply entry
@@ -309,7 +324,8 @@ export default function Products({ userProfile }: ProductsProps) {
         buyPrice: price,
         totalCost: expenseAmount,
         date: new Date(),
-        ownerId
+        ownerId,
+        userId: userProfile?.uid || ownerId
       });
 
       // Track in custom offline queue if offline to count pending operations

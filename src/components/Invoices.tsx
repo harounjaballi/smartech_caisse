@@ -272,7 +272,8 @@ export default function Invoices({ userProfile }: InvoicesProps) {
           tva: tvaAmount,
           items: cart,
           invoiceId: invoiceRef.id,
-          ownerId
+          ownerId,
+          userId: userProfile?.uid || ownerId
         };
 
         const invoiceData = {
@@ -290,7 +291,8 @@ export default function Invoices({ userProfile }: InvoicesProps) {
           tva: tvaAmount,
           date: serverTimestamp(),
           items: cart,
-          ownerId
+          ownerId,
+          userId: userProfile?.uid || ownerId
         };
 
         transaction.set(saleRef, saleData);

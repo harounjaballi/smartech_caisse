@@ -67,9 +67,17 @@ export default function Clients({ userProfile }: ClientsProps) {
     e.preventDefault();
     try {
       if (editingClient) {
-        await updateDoc(doc(db, 'clients', editingClient.id), formData);
+        await updateDoc(doc(db, 'clients', editingClient.id), {
+          ...formData,
+          ownerId,
+          userId: userProfile?.uid || ownerId
+        });
       } else {
-        await addDoc(collection(db, 'clients'), { ...formData, ownerId });
+        await addDoc(collection(db, 'clients'), {
+          ...formData,
+          ownerId,
+          userId: userProfile?.uid || ownerId
+        });
       }
       closeModal();
     } catch (error) {

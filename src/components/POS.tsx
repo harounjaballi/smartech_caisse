@@ -567,7 +567,8 @@ export default function POS({ userProfile }: POSProps) {
             tva: tvaAmount,
             items: cart,
             invoiceId: invoiceRef.id,
-            ownerId
+            ownerId,
+            userId: userProfile?.uid || ownerId
           };
 
           const invoiceData = {
@@ -585,7 +586,8 @@ export default function POS({ userProfile }: POSProps) {
             tva: tvaAmount,
             date: serverTimestamp(),
             items: cart,
-            ownerId
+            ownerId,
+            userId: userProfile?.uid || ownerId
           };
 
           transaction.set(saleRef, saleData);

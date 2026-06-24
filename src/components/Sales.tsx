@@ -79,7 +79,8 @@ export default function Sales({ userProfile }: SalesProps) {
           invoiceId: saleToDelete.invoiceId || 'N/A',
           invoiceNumber,
           total: saleToDelete.total,
-          ownerId
+          ownerId,
+          userId: userProfile?.uid || ownerId
         });
 
         // 5. Delete sale locally
@@ -143,7 +144,8 @@ export default function Sales({ userProfile }: SalesProps) {
             invoiceId: saleToDelete.invoiceId || 'N/A',
             invoiceNumber,
             total: saleToDelete.total,
-            ownerId
+            ownerId,
+            userId: userProfile?.uid || ownerId
           });
 
           // Delete sale

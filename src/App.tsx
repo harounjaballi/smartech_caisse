@@ -431,8 +431,14 @@ export default function App() {
             alert('Votre compte a été banni. Veuillez contacter l\'administrateur.');
             window.location.reload();
           } else {
-            setUserProfile(profileData);
-            localStorage.setItem('custom_session', JSON.stringify(profileData));
+            const repairedProfile = { ...profileData };
+            if (!repairedProfile.ownerId) {
+              repairedProfile.ownerId = repairedProfile.uid;
+              setDoc(userRef, { ownerId: repairedProfile.uid }, { merge: true })
+                .catch(err => console.error("Error repairing ownerId in Firestore:", err));
+            }
+            setUserProfile(repairedProfile);
+            localStorage.setItem('custom_session', JSON.stringify(repairedProfile));
           }
         }
       }, (error) => {
