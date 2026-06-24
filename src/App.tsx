@@ -389,21 +389,6 @@ export default function App() {
     let unsubscribeProfile: (() => void) | null = null;
     let isMounted = true;
 
-    // Load custom local session first (if exists) to avoid initial screen flicker
-    const storedSession = localStorage.getItem('custom_session');
-    let initialProfile: UserProfile | null = null;
-    if (storedSession) {
-      try {
-        initialProfile = JSON.parse(storedSession);
-        setUser({ uid: initialProfile.uid, email: initialProfile.email } as any);
-        setUserProfile(initialProfile);
-        setLoading(false);
-        console.log("[AUTH RE-HYDRATE] Restored fallback custom session:", initialProfile.uid, initialProfile.email);
-      } catch (err) {
-        console.error("Error restoring custom session:", err);
-      }
-    }
-
     const startProfileListener = (uid: string, isFirebaseUser: boolean) => {
       if (unsubscribeProfile) {
         unsubscribeProfile();
@@ -432,7 +417,7 @@ export default function App() {
             window.location.reload();
           } else {
             const repairedProfile = { ...profileData };
-            if (repairedProfile.ownerId !== repairedProfile.uid) {
+            if (repairedProfile.role === 'admin' && repairedProfile.ownerId !== repairedProfile.uid) {
               console.log(`[REPAIR ownerId] Repairing user ${repairedProfile.uid} ownerId from ${repairedProfile.ownerId} to ${repairedProfile.uid}`);
               repairedProfile.ownerId = repairedProfile.uid;
               setDoc(userRef, { ownerId: repairedProfile.uid }, { merge: true })
@@ -446,10 +431,6 @@ export default function App() {
         console.error("Error listening real-time to active user profile:", error);
       });
     };
-
-    if (initialProfile) {
-      startProfileListener(initialProfile.uid, false);
-    }
 
     // Set up standard Firebase auth state listener
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -476,7 +457,7 @@ export default function App() {
           await setDoc(userRef, profileData);
         } else {
           profileData = userSnap.data() as UserProfile;
-          if (profileData.ownerId !== profileData.uid) {
+          if (profileData.role === 'admin' && profileData.ownerId !== profileData.uid) {
             console.log(`[AUTH REPAIR ownerId] Updating user ${profileData.uid} ownerId from ${profileData.ownerId} to ${profileData.uid}`);
             profileData.ownerId = profileData.uid;
             await setDoc(userRef, { ownerId: profileData.uid }, { merge: true });
@@ -492,20 +473,15 @@ export default function App() {
         startProfileListener(firebaseUser.uid, true);
       } else {
         // Firebase Auth is signed out
-        // If we DO NOT have a custom localStorage session fallback either, then clear entirely
-        const currentCustomSession = localStorage.getItem('custom_session');
-        if (!currentCustomSession) {
-          console.log("[AUTH CENTRAL] No active user session - Unauthenticated status");
-          if (unsubscribeProfile) {
-            unsubscribeProfile();
-            unsubscribeProfile = null;
-          }
-          setUser(null);
-          setUserProfile(null);
-          setLoading(false);
-        } else {
-          console.log("[AUTH CENTRAL] No active Firebase Auth, keeping fallback custom session.");
+        console.log("[AUTH CENTRAL] No active user session - Unauthenticated status");
+        if (unsubscribeProfile) {
+          unsubscribeProfile();
+          unsubscribeProfile = null;
         }
+        localStorage.removeItem('custom_session');
+        setUser(null);
+        setUserProfile(null);
+        setLoading(false);
       }
     });
 

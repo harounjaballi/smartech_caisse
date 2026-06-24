@@ -257,7 +257,7 @@ export default function Users({ userProfile }: UsersProps) {
         role: roleInput,
         status: 'active',
         allowedMenus: selectedMenus,
-        ownerId: targetUid,
+        ownerId: roleInput === 'admin' ? targetUid : ownerId,
         creatorId: ownerId
       });
       console.log("Création et sauvegarde Firestore terminées!");
@@ -402,7 +402,7 @@ export default function Users({ userProfile }: UsersProps) {
           role: editRole,
           status: editStatus,
           allowedMenus: editSelectedMenus,
-          ownerId: targetUid,
+          ownerId: editRole === 'admin' ? targetUid : ownerId,
           creatorId: ownerId
         });
 
@@ -417,7 +417,8 @@ export default function Users({ userProfile }: UsersProps) {
           password: editPassword,
           role: editRole,
           status: editStatus,
-          allowedMenus: editSelectedMenus
+          allowedMenus: editSelectedMenus,
+          ownerId: editRole === 'admin' ? targetUid : ownerId
         });
       }
 

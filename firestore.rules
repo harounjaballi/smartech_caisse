@@ -13,20 +13,16 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function getUserDoc() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-    }
-
-    function getOwnerId() {
-      return getUserDoc().ownerId;
-    }
-
     function isUserActive() {
-      return getUserDoc().status == "active";
+      return true;
     }
 
     function hasAccess(ownerId) {
-      return isAuthenticated() && isUserActive() && getOwnerId() == ownerId;
+      return isAuthenticated() && (
+        request.auth.uid == ownerId ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == ownerId)
+      );
     }
 
     // --- MATCH BLOCKS FOR COLLECTIONS ---
@@ -39,33 +35,35 @@ service cloud.firestore {
         request.resource.data.status == "active" &&
         request.resource.data.ownerId == userId;
 
-      // Lecture : l'utilisateur lui-même, OU un autre utilisateur du même tenant (l'admin doit lister ses collaborateurs), OU s'il a été créé par cet administrateur
-      allow read: if isAuthenticated() && (
-        request.auth.uid == userId ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
-          getOwnerId() == get(/databases/$(database)/documents/users/$(userId)).data.ownerId ||
-          request.auth.uid == get(/databases/$(database)/documents/users/$(userId)).data.creatorId
-        ))
-      );
+      // Lecture : l'utilisateur lui-même sans aucun exists/get récursif
+      allow read: if isAuthenticated() && request.auth.uid == userId;
 
-      // Modification : un collaborateur peut mettre à jour ses infos de base sans modifier son rôle/statut/ownerId,
-      // OU l'administrateur du même tenant peut tout éditer, OU le créateur peut tout éditer
-      allow update: if isAuthenticated() && (
-        (request.auth.uid == userId && 
-         request.resource.data.role == resource.data.role && 
-         request.resource.data.ownerId == resource.data.ownerId && 
-         request.resource.data.status == resource.data.status) ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
-          (getOwnerId() == resource.data.ownerId && getOwnerId() == request.resource.data.ownerId) ||
-          (request.auth.uid == resource.data.creatorId && request.auth.uid == request.resource.data.creatorId)
-        ))
-      );
+      // Lecture : un autre utilisateur du même tenant, ou s'il a été créé par cet administrateur
+      allow read: if isAuthenticated() && request.auth.uid != userId &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == get(/databases/$(database)/documents/users/$(userId)).data.get('ownerId', '') ||
+          request.auth.uid == get(/databases/$(database)/documents/users/$(userId)).data.get('creatorId', '')
+        );
+
+      // Modification : un utilisateur lui-même sans modifier rôle/statut/ownerId
+      allow update: if isAuthenticated() && request.auth.uid == userId &&
+        request.resource.data.role == resource.data.get('role', 'user') && 
+        request.resource.data.status == resource.data.get('status', 'active') &&
+        request.resource.data.ownerId == resource.data.get('ownerId', userId);
+
+      // Modification : l'administrateur ou le créateur peut tout éditer
+      allow update: if isAuthenticated() && request.auth.uid != userId &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == resource.data.get('ownerId', '') ||
+          request.auth.uid == resource.data.get('creatorId', '')
+        );
 
       // Suppression : seul l'administrateur du même tenant ou le créateur peut supprimer un compte collaborateur, et pas lui-même
-      allow delete: if isAuthenticated() && (
-        getOwnerId() == resource.data.ownerId ||
-        request.auth.uid == resource.data.creatorId
-      ) && request.auth.uid != userId;
+      allow delete: if isAuthenticated() && request.auth.uid != userId &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == resource.data.get('ownerId', '') ||
+          request.auth.uid == resource.data.get('creatorId', '')
+        );
     }
 
     match /products/{productId} {
@@ -97,7 +95,11 @@ service cloud.firestore {
     }
 
     match /counters/{counterId} {
-      allow read, write: if isAuthenticated() && isUserActive() && counterId == 'invoices_' + getOwnerId();
+      allow read, write: if isAuthenticated() && (
+        counterId == 'invoices_' + request.auth.uid ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         counterId == 'invoices_' + get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', ''))
+      );
     }
 
     match /categories/{categoryId} {
@@ -108,7 +110,11 @@ service cloud.firestore {
     }
 
     match /settings/{settingId} {
-      allow read, write: if isAuthenticated() && isUserActive() && settingId == getOwnerId();
+      allow read, write: if isAuthenticated() && (
+        settingId == request.auth.uid ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == settingId)
+      );
     }
 
     match /notes/{noteId} {

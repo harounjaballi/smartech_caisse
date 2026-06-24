@@ -54,7 +54,8 @@ async function startServer() {
         password, // Clartext password so the admin can display and view user credentials easily
         role: targetRole,
         status: "active",
-        allowedMenus: sanitizedMenus
+        allowedMenus: sanitizedMenus,
+        ownerId: userRecord.uid
       });
 
       res.json({ success: true, user: userRecord });
