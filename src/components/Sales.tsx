@@ -24,7 +24,7 @@ export default function Sales({ userProfile }: SalesProps) {
   const [saleToDelete, setSaleToDelete] = useState<Sale | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const ownerId = userProfile?.ownerId || (userProfile?.role === 'admin' ? userProfile.uid : 'admin_fallback');
+  const ownerId = userProfile?.ownerId || userProfile?.uid || 'no_user_auth';
 
   const handleDeleteConfirm = async () => {
     if (!saleToDelete) return;

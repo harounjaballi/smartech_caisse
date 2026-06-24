@@ -16,7 +16,7 @@ export default function Settings({ userProfile }: SettingsProps) {
   const [loading, setLoading] = useState(true);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const ownerId = userProfile?.ownerId || (userProfile?.role === 'admin' ? userProfile.uid : 'admin_fallback');
+  const ownerId = userProfile?.ownerId || userProfile?.uid || 'no_user_auth';
 
   if (userProfile && !hasMenuAccess(userProfile, 'settings')) {
     return (

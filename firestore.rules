@@ -2,71 +2,121 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
+    // Catch-all safety gate
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- HELPER FUNCTIONS ---
+    
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    function isHardcodedAdmin() {
-      return isAuthenticated() && (
-        request.auth.uid == "sufsYk0L6QM9bI45kZknZdlzEtJ2" ||
-        request.auth.token.get('email', '') == "harounjaballi@gmail.com"
-      );
+    function getUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
-    function isAdmin() {
-      return isHardcodedAdmin() || (
-        isAuthenticated() && (
-          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'user') == 'admin')
-        )
-      );
+    function getOwnerId() {
+      return getUserDoc().ownerId;
     }
+
+    function isUserActive() {
+      return getUserDoc().status == "active";
+    }
+
+    function hasAccess(ownerId) {
+      return isAuthenticated() && isUserActive() && getOwnerId() == ownerId;
+    }
+
+    // --- MATCH BLOCKS FOR COLLECTIONS ---
 
     match /users/{userId} {
-      // Les utilisateurs peuvent lire/écrire leur propre profil
-      // Les administrateurs peuvent gérer tous les profils d'utilisateurs
-      allow read, write: if isAuthenticated() && (
-        request.auth.uid == userId || 
-        isAdmin()
+      // Un utilisateur peut créer son profil à l'inscription s'il est admin de lui-même et actif
+      allow create: if isAuthenticated() && request.auth.uid == userId &&
+        request.resource.data.uid == userId &&
+        request.resource.data.role == "admin" &&
+        request.resource.data.status == "active" &&
+        request.resource.data.ownerId == userId;
+
+      // Lecture : l'utilisateur lui-même, OU un autre utilisateur du même tenant (l'admin doit lister ses collaborateurs)
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         getOwnerId() == get(/databases/$(database)/documents/users/$(userId)).data.ownerId)
       );
+
+      // Modification : un collaborateur peut mettre à jour ses infos de base sans modifier son rôle/statut/ownerId,
+      // OU l'administrateur du même tenant peut tout éditer
+      allow update: if isAuthenticated() && (
+        (request.auth.uid == userId && 
+         request.resource.data.role == resource.data.role && 
+         request.resource.data.ownerId == resource.data.ownerId && 
+         request.resource.data.status == resource.data.status) ||
+        (getOwnerId() == resource.data.ownerId && getOwnerId() == request.resource.data.ownerId)
+      );
+
+      // Suppression : seul l'administrateur du même tenant peut supprimer un compte collaborateur, et pas lui-même
+      allow delete: if isAuthenticated() && 
+        getOwnerId() == resource.data.ownerId && 
+        request.auth.uid != userId;
     }
 
-    // Sessions, produits, clients, ventes, etc. sont accessibles par tous les utilisateurs autorisés et authentifiés.
-    // Cela évite tout blocage d'accès (Permission Denied) lors du chargement des dashboards ou interfaces de caisse.
     match /products/{productId} {
-      allow read, write: if isAuthenticated();
+      allow read: if hasAccess(resource.data.ownerId);
+      allow create: if hasAccess(request.resource.data.ownerId);
+      allow update: if hasAccess(resource.data.ownerId) && hasAccess(request.resource.data.ownerId);
+      allow delete: if hasAccess(resource.data.ownerId);
     }
 
     match /clients/{clientId} {
-      allow read, write: if isAuthenticated();
+      allow read: if hasAccess(resource.data.ownerId);
+      allow create: if hasAccess(request.resource.data.ownerId);
+      allow update: if hasAccess(resource.data.ownerId) && hasAccess(request.resource.data.ownerId);
+      allow delete: if hasAccess(resource.data.ownerId);
     }
 
     match /sales/{saleId} {
-      allow read, write: if isAuthenticated();
+      allow read: if hasAccess(resource.data.ownerId);
+      allow create: if hasAccess(request.resource.data.ownerId);
+      allow update: if hasAccess(resource.data.ownerId) && hasAccess(request.resource.data.ownerId);
+      allow delete: if hasAccess(resource.data.ownerId);
     }
 
     match /invoices/{invoiceId} {
-      allow read, write: if isAuthenticated();
+      allow read: if hasAccess(resource.data.ownerId);
+      allow create: if hasAccess(request.resource.data.ownerId);
+      allow update: if hasAccess(resource.data.ownerId) && hasAccess(request.resource.data.ownerId);
+      allow delete: if hasAccess(resource.data.ownerId);
     }
 
     match /counters/{counterId} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if isAuthenticated() && isUserActive() && counterId == 'invoices_' + getOwnerId();
     }
 
     match /categories/{categoryId} {
-      allow read, write: if isAuthenticated();
+      allow read: if hasAccess(resource.data.ownerId);
+      allow create: if hasAccess(request.resource.data.ownerId);
+      allow update: if hasAccess(resource.data.ownerId) && hasAccess(request.resource.data.ownerId);
+      allow delete: if hasAccess(resource.data.ownerId);
     }
 
     match /settings/{settingId} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if isAuthenticated() && isUserActive() && settingId == getOwnerId();
     }
 
     match /notes/{noteId} {
-      allow read, write: if isAuthenticated();
+      allow read: if hasAccess(resource.data.ownerId);
+      allow create: if hasAccess(request.resource.data.ownerId);
+      allow update: if hasAccess(resource.data.ownerId) && hasAccess(request.resource.data.ownerId);
+      allow delete: if hasAccess(resource.data.ownerId);
     }
 
     match /supplies/{supplyId} {
-      allow read, write: if isAuthenticated();
+      allow read: if hasAccess(resource.data.ownerId);
+      allow create: if hasAccess(request.resource.data.ownerId);
+      allow update: if hasAccess(resource.data.ownerId) && hasAccess(request.resource.data.ownerId);
+      allow delete: if hasAccess(resource.data.ownerId);
     }
   }
 }

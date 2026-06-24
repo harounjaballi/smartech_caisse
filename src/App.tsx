@@ -359,7 +359,7 @@ export default function App() {
       setTodayNotes([]);
       return;
     }
-    const ownerId = userProfile?.ownerId || (userProfile?.role === 'admin' ? userProfile.uid : 'admin_fallback');
+    const ownerId = userProfile?.ownerId || userProfile?.uid || 'no_user_auth';
     const todayStr = new Date().toISOString().split('T')[0];
     
     // Listen for notes of this owner, sort client-side to avoid compound index requirements
@@ -470,7 +470,7 @@ export default function App() {
         } else {
           profileData = userSnap.data() as UserProfile;
           if (!profileData.ownerId) {
-            profileData.ownerId = profileData.role === 'admin' ? profileData.uid : 'admin_fallback';
+            profileData.ownerId = profileData.uid;
             await setDoc(userRef, { ownerId: profileData.ownerId }, { merge: true });
           }
         }

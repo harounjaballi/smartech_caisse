@@ -19,7 +19,7 @@ export default function Clients({ userProfile }: ClientsProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
 
-  const ownerId = userProfile?.ownerId || (userProfile?.role === 'admin' ? userProfile.uid : 'admin_fallback');
+  const ownerId = userProfile?.ownerId || userProfile?.uid || 'no_user_auth';
 
   // Settlement state
   const [isSettleModalOpen, setIsSettleModalOpen] = useState(false);

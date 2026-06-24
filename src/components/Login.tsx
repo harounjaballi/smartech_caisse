@@ -54,17 +54,16 @@ export default function Login() {
             
             const newUid = 'user_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
             const isFirst = email === 'harounjaballi@gmail.com';
-            const defaultAllowed = isFirst
-              ? ['dashboard', 'pos', 'products', 'clients', 'sales', 'invoices', 'notes', 'users', 'settings']
-              : ['dashboard', 'pos', 'products', 'clients', 'sales', 'invoices', 'notes'];
+            const defaultAllowed = ['dashboard', 'pos', 'products', 'clients', 'sales', 'invoices', 'notes', 'users', 'settings'];
               
             const profileData = {
               uid: newUid,
               email: email,
               password: password,
-              role: isFirst ? 'admin' : 'user',
+              role: 'admin',
               status: 'active',
-              allowedMenus: defaultAllowed
+              allowedMenus: defaultAllowed,
+              ownerId: newUid
             };
             
             await setDoc(doc(db, 'users', newUid), profileData);

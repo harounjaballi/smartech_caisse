@@ -26,7 +26,7 @@ export default function Invoices({ userProfile }: InvoicesProps) {
   const [isNewInvoiceModalOpen, setIsNewInvoiceModalOpen] = useState(false);
   const [productSearch, setProductSearch] = useState('');
 
-  const ownerId = userProfile?.ownerId || (userProfile?.role === 'admin' ? userProfile.uid : 'admin_fallback');
+  const ownerId = userProfile?.ownerId || userProfile?.uid || 'no_user_auth';
   
   const handlePrint = () => {
     console.log('Impression du ticket en cours...', selectedInvoice);

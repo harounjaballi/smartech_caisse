@@ -50,7 +50,7 @@ export default function Users({ userProfile }: UsersProps) {
   const [errorOnCreate, setErrorOnCreate] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  const ownerId = userProfile?.ownerId || (userProfile?.role === 'admin' ? userProfile.uid : 'admin_fallback');
+  const ownerId = userProfile?.ownerId || userProfile?.uid || 'no_user_auth';
 
   // Password visibility state for each user in the table: key is user uid
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});

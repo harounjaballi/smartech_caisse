@@ -74,7 +74,7 @@ export async function syncPendingOperations(
     return { success: true, syncedCount: 0, errors: [] };
   }
 
-  const ownerId = userProfile?.ownerId || (userProfile?.role === 'admin' ? userProfile.uid : 'admin_fallback');
+  const ownerId = userProfile?.ownerId || userProfile?.uid || 'no_user_auth';
   let syncedCount = 0;
   const errors: string[] = [];
 

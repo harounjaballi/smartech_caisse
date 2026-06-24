@@ -12,7 +12,7 @@ interface ProductsProps {
 }
 
 export default function Products({ userProfile }: ProductsProps) {
-  const ownerId = userProfile?.ownerId || (userProfile?.role === 'admin' ? userProfile.uid : 'admin_fallback');
+  const ownerId = userProfile?.ownerId || userProfile?.uid || 'no_user_auth';
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);

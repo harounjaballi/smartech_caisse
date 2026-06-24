@@ -234,7 +234,7 @@ export default function Dashboard({ userProfile }: DashboardProps) {
   const [editingSupplyQty, setEditingSupplyQty] = useState('');
   const [editingSupplyPrice, setEditingSupplyPrice] = useState('');
 
-  const ownerId = userProfile?.ownerId || (userProfile?.role === 'admin' ? userProfile.uid : 'admin_fallback');
+  const ownerId = userProfile?.ownerId || userProfile?.uid || 'no_user_auth';
 
   useEffect(() => {
     // Fetch sales belonging to this store, sort client-side to avoid composite indexes
