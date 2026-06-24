@@ -39,27 +39,33 @@ service cloud.firestore {
         request.resource.data.status == "active" &&
         request.resource.data.ownerId == userId;
 
-      // Lecture : l'utilisateur lui-même, OU un autre utilisateur du même tenant (l'admin doit lister ses collaborateurs)
+      // Lecture : l'utilisateur lui-même, OU un autre utilisateur du même tenant (l'admin doit lister ses collaborateurs), OU s'il a été créé par cet administrateur
       allow read: if isAuthenticated() && (
         request.auth.uid == userId ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         getOwnerId() == get(/databases/$(database)/documents/users/$(userId)).data.ownerId)
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
+          getOwnerId() == get(/databases/$(database)/documents/users/$(userId)).data.ownerId ||
+          request.auth.uid == get(/databases/$(database)/documents/users/$(userId)).data.creatorId
+        ))
       );
 
       // Modification : un collaborateur peut mettre à jour ses infos de base sans modifier son rôle/statut/ownerId,
-      // OU l'administrateur du même tenant peut tout éditer
+      // OU l'administrateur du même tenant peut tout éditer, OU le créateur peut tout éditer
       allow update: if isAuthenticated() && (
         (request.auth.uid == userId && 
          request.resource.data.role == resource.data.role && 
          request.resource.data.ownerId == resource.data.ownerId && 
          request.resource.data.status == resource.data.status) ||
-        (getOwnerId() == resource.data.ownerId && getOwnerId() == request.resource.data.ownerId)
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
+          (getOwnerId() == resource.data.ownerId && getOwnerId() == request.resource.data.ownerId) ||
+          (request.auth.uid == resource.data.creatorId && request.auth.uid == request.resource.data.creatorId)
+        ))
       );
 
-      // Suppression : seul l'administrateur du même tenant peut supprimer un compte collaborateur, et pas lui-même
-      allow delete: if isAuthenticated() && 
-        getOwnerId() == resource.data.ownerId && 
-        request.auth.uid != userId;
+      // Suppression : seul l'administrateur du même tenant ou le créateur peut supprimer un compte collaborateur, et pas lui-même
+      allow delete: if isAuthenticated() && (
+        getOwnerId() == resource.data.ownerId ||
+        request.auth.uid == resource.data.creatorId
+      ) && request.auth.uid != userId;
     }
 
     match /products/{productId} {

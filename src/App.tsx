@@ -432,7 +432,8 @@ export default function App() {
             window.location.reload();
           } else {
             const repairedProfile = { ...profileData };
-            if (!repairedProfile.ownerId) {
+            if (repairedProfile.ownerId !== repairedProfile.uid) {
+              console.log(`[REPAIR ownerId] Repairing user ${repairedProfile.uid} ownerId from ${repairedProfile.ownerId} to ${repairedProfile.uid}`);
               repairedProfile.ownerId = repairedProfile.uid;
               setDoc(userRef, { ownerId: repairedProfile.uid }, { merge: true })
                 .catch(err => console.error("Error repairing ownerId in Firestore:", err));
@@ -475,9 +476,10 @@ export default function App() {
           await setDoc(userRef, profileData);
         } else {
           profileData = userSnap.data() as UserProfile;
-          if (!profileData.ownerId) {
+          if (profileData.ownerId !== profileData.uid) {
+            console.log(`[AUTH REPAIR ownerId] Updating user ${profileData.uid} ownerId from ${profileData.ownerId} to ${profileData.uid}`);
             profileData.ownerId = profileData.uid;
-            await setDoc(userRef, { ownerId: profileData.ownerId }, { merge: true });
+            await setDoc(userRef, { ownerId: profileData.uid }, { merge: true });
           }
         }
 

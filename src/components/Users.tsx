@@ -75,18 +75,47 @@ export default function Users({ userProfile }: UsersProps) {
   const [errorOnEdit, setErrorOnEdit] = useState<string | null>(null);
 
   useEffect(() => {
-    const q = query(collection(db, 'users'), where('ownerId', '==', ownerId));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const uList = snapshot.docs.map(doc => ({ ...doc.data() } as UserProfile));
-      setUsers(uList);
+    const qLegacy = query(collection(db, 'users'), where('ownerId', '==', ownerId));
+    const qNew = query(collection(db, 'users'), where('creatorId', '==', ownerId));
+
+    let legacyUsers: UserProfile[] = [];
+    let newUsers: UserProfile[] = [];
+
+    const updateMergedUsers = () => {
+      const mergedMap = new Map<string, UserProfile>();
+      
+      // Add legacy users
+      legacyUsers.forEach(u => mergedMap.set(u.uid, u));
+      // Add new users (overwriting any overlaps)
+      newUsers.forEach(u => mergedMap.set(u.uid, u));
+
+      // Filter out current logged-in user to avoid self-management if present
+      const list = Array.from(mergedMap.values()).filter(u => u.uid !== userProfile?.uid);
+      setUsers(list);
       setLoading(false);
+    };
+
+    const unsubscribeLegacy = onSnapshot(qLegacy, (snapshot) => {
+      legacyUsers = snapshot.docs.map(doc => ({ ...doc.data() } as UserProfile));
+      updateMergedUsers();
     }, (err) => {
-      console.error(err);
+      console.error("Error loading legacy users:", err);
       setLoading(false);
     });
 
-    return () => unsubscribe();
-  }, [ownerId]);
+    const unsubscribeNew = onSnapshot(qNew, (snapshot) => {
+      newUsers = snapshot.docs.map(doc => ({ ...doc.data() } as UserProfile));
+      updateMergedUsers();
+    }, (err) => {
+      console.error("Error loading new isolated users:", err);
+      setLoading(false);
+    });
+
+    return () => {
+      unsubscribeLegacy();
+      unsubscribeNew();
+    };
+  }, [ownerId, userProfile?.uid]);
 
   const handleRoleChangeOnCreate = (role: 'admin' | 'user') => {
     setRoleInput(role);
@@ -228,7 +257,8 @@ export default function Users({ userProfile }: UsersProps) {
         role: roleInput,
         status: 'active',
         allowedMenus: selectedMenus,
-        ownerId: ownerId
+        ownerId: targetUid,
+        creatorId: ownerId
       });
       console.log("Création et sauvegarde Firestore terminées!");
 
@@ -372,7 +402,8 @@ export default function Users({ userProfile }: UsersProps) {
           role: editRole,
           status: editStatus,
           allowedMenus: editSelectedMenus,
-          ownerId: ownerId
+          ownerId: targetUid,
+          creatorId: ownerId
         });
 
         console.log(`Migration Firestore : suppression de l'ancien profil users/${editingUser.uid}`);
@@ -558,7 +589,11 @@ export default function Users({ userProfile }: UsersProps) {
                               {profile.name || 'Sans Nom'}
                             </div>
                             <span className="text-[10px] font-medium text-slate-500 mt-1 block">{profile.email}</span>
-                            <span className="text-[9px] text-slate-400 font-mono mt-1 block">ID: {profile.uid.substring(0, 10)}...</span>
+                            <div className="text-[9px] text-slate-400 font-mono mt-1 space-y-0.5">
+                              <div>UID: {profile.uid}</div>
+                              <div>Owner ID: {profile.ownerId || 'Non défini'}</div>
+                              {profile.creatorId && <div>Créateur: {profile.creatorId}</div>}
+                            </div>
                           </div>
                         </div>
                       </td>

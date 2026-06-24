@@ -79,6 +79,7 @@ export interface UserProfile {
   allowedMenus?: string[];
   password?: string;
   ownerId?: string;
+  creatorId?: string;
 }
 
 export interface StoreSettings {
