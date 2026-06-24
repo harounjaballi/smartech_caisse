@@ -26,6 +26,7 @@ export default function Products({ userProfile }: ProductsProps) {
   const [scanMessage, setScanMessage] = useState('');
   const [deletingCatId, setDeletingCatId] = useState<string | null>(null);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // States for stock replenishment modal
   const [replenishProduct, setReplenishProduct] = useState<Product | null>(null);
@@ -177,6 +178,7 @@ export default function Products({ userProfile }: ProductsProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMsg(null);
     try {
       if (editingProduct) {
         const oldStock = editingProduct.stock || 0;
@@ -292,8 +294,9 @@ export default function Products({ userProfile }: ProductsProps) {
         }
       }
       closeModal();
-    } catch (error) {
-      handleFirestoreError(error, editingProduct ? OperationType.UPDATE : OperationType.CREATE, 'products');
+    } catch (error: any) {
+      console.error("[ERROR] Failed to save product:", error);
+      setErrorMsg(error?.message || String(error));
     }
   };
 
@@ -351,13 +354,15 @@ export default function Products({ userProfile }: ProductsProps) {
       setReplenishQty('');
       setReplenishPrice('');
       playBeep('success');
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'products');
+    } catch (error: any) {
+      console.error("[ERROR] Failed to replenish product stock:", error);
+      playBeep('error');
     }
   };
 
   const executeProductDelete = async () => {
     if (!productToDelete) return;
+    setErrorMsg(null);
     try {
       // Delete associated supplies
       const suppliesRef = collection(db, 'supplies');
@@ -370,8 +375,9 @@ export default function Products({ userProfile }: ProductsProps) {
       await deleteDoc(doc(db, 'products', productToDelete.id));
       console.log(`[DEBUG] Produit supprimé: "${productToDelete.name}" (ID: ${productToDelete.id}). Quantité: ${productToDelete.stock}, Prix d'achat: ${productToDelete.buyPrice}. Toutes les dépenses correspondantes ont été supprimées.`);
       setProductToDelete(null);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, 'products');
+    } catch (error: any) {
+      console.error("[ERROR] Failed to delete product:", error);
+      setErrorMsg(error?.message || String(error));
     }
   };
 
@@ -389,6 +395,7 @@ export default function Products({ userProfile }: ProductsProps) {
   };
 
   const openModal = (product?: Product) => {
+    setErrorMsg(null);
     if (product) {
       setEditingProduct(product);
       setFormData({
@@ -424,6 +431,7 @@ export default function Products({ userProfile }: ProductsProps) {
   const closeModal = () => {
     setIsModalOpen(false);
     setEditingProduct(null);
+    setErrorMsg(null);
   };
 
   const handleQuickCategoryAdd = async (e: React.FormEvent) => {
@@ -629,6 +637,12 @@ export default function Products({ userProfile }: ProductsProps) {
 
             <form onSubmit={handleSubmit} className="flex-1 flex flex-col min-h-0 overflow-hidden">
               <div className="flex-1 overflow-y-auto p-6 space-y-4 touch-pan-y">
+                {errorMsg && (
+                  <div className="p-3.5 bg-red-50 border border-red-100 rounded-xl flex items-start gap-2 text-red-700 text-xs font-medium animate-in fade-in duration-150">
+                    <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                    <span className="break-all">{errorMsg}</span>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="col-span-2">
                     <label className="block text-sm font-medium text-gray-700 mb-1">Nom du produit</label>
@@ -964,6 +978,13 @@ export default function Products({ userProfile }: ProductsProps) {
                 </p>
               </div>
             </div>
+
+            {errorMsg && (
+              <div className="p-3 bg-red-50 border border-red-100 rounded-xl flex items-start gap-2 text-red-700 text-xs font-medium animate-in fade-in duration-150">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <span className="break-all">{errorMsg}</span>
+              </div>
+            )}
             
             <div className="flex gap-3 justify-end pt-2">
               <button
