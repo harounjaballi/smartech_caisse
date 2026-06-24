@@ -184,7 +184,7 @@ export default function Products({ userProfile }: ProductsProps) {
 
         // Recalculate existing supplies of this product
         const suppliesRef = collection(db, 'supplies');
-        const q = query(suppliesRef, where('productId', '==', editingProduct.id));
+        const q = query(suppliesRef, where('ownerId', '==', ownerId), where('productId', '==', editingProduct.id));
         const querySnapshot = await getDocs(q);
 
         for (const d of querySnapshot.docs) {
@@ -361,7 +361,7 @@ export default function Products({ userProfile }: ProductsProps) {
     try {
       // Delete associated supplies
       const suppliesRef = collection(db, 'supplies');
-      const q = query(suppliesRef, where('productId', '==', productToDelete.id));
+      const q = query(suppliesRef, where('ownerId', '==', ownerId), where('productId', '==', productToDelete.id));
       const querySnapshot = await getDocs(q);
       for (const d of querySnapshot.docs) {
         await deleteDoc(doc(db, 'supplies', d.id));
