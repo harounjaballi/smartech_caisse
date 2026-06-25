@@ -1,9 +1,11 @@
-const CACHE_NAME = 'smartech-pos-v1';
+const CACHE_NAME = 'smartech-pos-v2';
 const ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/icon.svg'
+  '/icon.svg',
+  '/icon-192.jpg',
+  '/icon-512.jpg'
 ];
 
 self.addEventListener('install', (event) => {
@@ -29,35 +31,57 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Only handle GET requests and same-origin assets
-  if (event.request.method !== 'GET' || !event.request.url.startsWith(self.location.origin)) {
+  // Only handle GET requests
+  if (event.request.method !== 'GET') {
     return;
   }
 
-  // Skip API or external calls
-  if (event.request.url.includes('/api/')) {
+  // Skip API or database syncing calls
+  const url = new URL(event.request.url);
+  if (url.pathname.includes('/api/') || url.hostname.includes('firestore.googleapis.com')) {
     return;
   }
 
-  event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      // Network-first with cache fallback
-      const fetchPromise = fetch(event.request)
+  // Navigation requests (HTML pages) -> Network-First (with offline cache fallback)
+  if (event.request.mode === 'navigate' || url.pathname === '/' || url.pathname.endsWith('.html')) {
+    event.respondWith(
+      fetch(event.request)
         .then((networkResponse) => {
           if (networkResponse && networkResponse.status === 200) {
-            const cacheCopy = networkResponse.clone();
+            const responseCopy = networkResponse.clone();
             caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, cacheCopy);
+              cache.put(event.request, responseCopy);
             });
           }
           return networkResponse;
         })
         .catch(() => {
-          // Fallback to cache if network fails
-          return cachedResponse;
-        });
+          return caches.match('/index.html') || caches.match(event.request);
+        })
+    );
+    return;
+  }
 
-      return cachedResponse || fetchPromise;
+  // Static assets (JS, CSS, images, fonts) -> Cache-First (with network backup and dynamic cache)
+  event.respondWith(
+    caches.match(event.request).then((cachedResponse) => {
+      if (cachedResponse) {
+        return cachedResponse;
+      }
+
+      return fetch(event.request).then((networkResponse) => {
+        // Cache new static assets dynamically (only same-origin assets)
+        if (networkResponse && networkResponse.status === 200 && url.origin === self.location.origin) {
+          const responseCopy = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseCopy);
+          });
+        }
+        return networkResponse;
+      }).catch(() => {
+        // Offline fallback for assets
+        return new Response('Offline', { status: 503, statusText: 'Offline' });
+      });
     })
   );
 });

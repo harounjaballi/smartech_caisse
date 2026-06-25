@@ -172,8 +172,32 @@ export function hasMenuAccess(userProfile: UserProfile | null, menuId: string): 
   return allowed.includes(menuId);
 }
 
-function Sidebar({ isOpen, setIsOpen, userProfile, todayNotesCount }: { isOpen: boolean; setIsOpen: (v: boolean) => void; userProfile: UserProfile | null; todayNotesCount: number }) {
+function Sidebar({ 
+  isOpen, 
+  setIsOpen, 
+  userProfile, 
+  todayNotesCount,
+  deferredPrompt,
+  handleInstallApp,
+  isOnline,
+  pendingCount,
+  syncing,
+  handleTriggerSync
+}: { 
+  isOpen: boolean; 
+  setIsOpen: (v: boolean) => void; 
+  userProfile: UserProfile | null; 
+  todayNotesCount: number;
+  deferredPrompt: any;
+  handleInstallApp: () => void;
+  isOnline: boolean;
+  pendingCount: number;
+  syncing: boolean;
+  handleTriggerSync: () => void;
+}) {
   const location = useLocation();
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone;
   
   const allNavItems = [
     { id: 'dashboard', name: 'Tableau de bord', path: '/', icon: LayoutDashboard },
@@ -255,6 +279,75 @@ function Sidebar({ isOpen, setIsOpen, userProfile, todayNotesCount }: { isOpen: 
             })}
           </nav>
 
+          {/* PWA / Offline Status Cards in Sidebar */}
+          <div className="px-4 py-3 border-t border-slate-100/60 bg-slate-50/30 space-y-3">
+            {/* Connection and Sync Status */}
+            {!isOnline ? (
+              <div className="p-3 bg-amber-50/70 border border-amber-100 rounded-xl text-amber-800 text-xs">
+                <div className="flex items-center gap-2 font-black uppercase tracking-wider text-[10px] mb-1">
+                  <WifiOff className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
+                  Mode Hors-ligne
+                </div>
+                <p className="text-[11px] leading-relaxed font-medium text-slate-500">
+                  Modifications sauvegardées localement. {pendingCount > 0 ? `${pendingCount} opération(s) en attente.` : 'Prêt pour reconnexion.'}
+                </p>
+              </div>
+            ) : pendingCount > 0 ? (
+              <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-xl text-indigo-800 text-xs">
+                <div className="flex items-center justify-between font-black uppercase tracking-wider text-[10px] mb-1">
+                  <span className="flex items-center gap-1.5">
+                    <RefreshCcw className={cn("w-3.5 h-3.5 text-indigo-500", syncing && "animate-spin")} />
+                    Synchronisation
+                  </span>
+                  <span className="bg-indigo-600 text-white px-1.5 py-0.5 rounded-full text-[9px]">
+                    {pendingCount}
+                  </span>
+                </div>
+                <p className="text-[11px] leading-relaxed font-medium text-slate-500 mb-2">
+                  Des modifications locales sont en attente d'envoi.
+                </p>
+                <button
+                  disabled={syncing}
+                  onClick={handleTriggerSync}
+                  className="w-full py-1.5 px-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition-colors"
+                >
+                  {syncing ? 'En cours...' : 'Synchroniser maintenant'}
+                </button>
+              </div>
+            ) : null}
+
+            {/* Install Prompt for Android / Desktop */}
+            {deferredPrompt && (
+              <div className="p-3 bg-gradient-to-br from-indigo-50/60 to-cyan-50/60 border border-indigo-100/60 rounded-xl text-indigo-950 text-xs shadow-xs">
+                <div className="font-black uppercase tracking-wider text-[10px] text-indigo-700 mb-1">
+                  ✨ Installer l'App
+                </div>
+                <p className="text-[11px] leading-relaxed font-medium text-slate-500 mb-2.5">
+                  Lancez SmarTech en plein écran directement depuis votre écran d'accueil.
+                </p>
+                <button
+                  onClick={handleInstallApp}
+                  className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Package className="w-3.5 h-3.5" />
+                  Installer maintenant
+                </button>
+              </div>
+            )}
+
+            {/* Install Prompt Guide for iOS */}
+            {isIOS && !isStandalone && (
+              <div className="p-3 bg-gradient-to-br from-indigo-50/60 to-violet-50/60 border border-indigo-100/60 rounded-xl text-indigo-950 text-xs">
+                <div className="font-black uppercase tracking-wider text-[10px] text-indigo-700 mb-1">
+                  📲 Installer sur iPhone
+                </div>
+                <p className="text-[11px] leading-relaxed font-medium text-slate-500">
+                  Appuyez sur <span className="font-bold">Partager</span> (<span className="text-[13px]">⎋</span>) puis sur <span className="font-bold">"Sur l'écran d'accueil"</span> (<span className="text-[13px]">⊕</span>).
+                </p>
+              </div>
+            )}
+          </div>
+
           <div className="p-4 border-t border-slate-100 bg-slate-50/50">
             <button
               onClick={async () => {
@@ -288,6 +381,26 @@ export default function App() {
   const [pendingCount, setPendingCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    console.log(`[PWA] Install prompt choice outcome: ${outcome}`);
+    setDeferredPrompt(null);
+  };
 
   useEffect(() => {
     // Initial pending count
@@ -510,7 +623,18 @@ export default function App() {
         <div className="min-h-screen bg-slate-50/50 flex" onClick={() => {
           if (showNotesPopover) setShowNotesPopover(false);
         }}>
-          <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} userProfile={userProfile} todayNotesCount={todayNotes.length} />
+          <Sidebar 
+            isOpen={sidebarOpen} 
+            setIsOpen={setSidebarOpen} 
+            userProfile={userProfile} 
+            todayNotesCount={todayNotes.length}
+            deferredPrompt={deferredPrompt}
+            handleInstallApp={handleInstallApp}
+            isOnline={isOnline}
+            pendingCount={pendingCount}
+            syncing={syncing}
+            handleTriggerSync={handleTriggerSync}
+          />
           
           <main className="flex-1 lg:pl-64 min-h-screen flex flex-col">
             <header className="h-16 bg-white/80 backdrop-blur-md border-b border-slate-100 flex items-center justify-between px-4 lg:px-8 sticky top-0 z-30 shadow-xs">
