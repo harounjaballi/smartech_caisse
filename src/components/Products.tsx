@@ -146,7 +146,16 @@ export default function Products({ userProfile }: ProductsProps) {
   useEffect(() => {
     const unsubscribeProds = onSnapshot(query(collection(db, 'products'), where('ownerId', '==', ownerId)), (snapshot) => {
       const prods = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
-      prods.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      prods.sort((a, b) => {
+        const dateA = a.createdAt || '';
+        const dateB = b.createdAt || '';
+        if (dateA && dateB) {
+          return dateB.localeCompare(dateA);
+        }
+        if (dateA) return -1;
+        if (dateB) return 1;
+        return (a.name || '').localeCompare(b.name || '');
+      });
       setProducts(prods);
       setLoading(false);
     }, (error) => {
@@ -263,6 +272,7 @@ export default function Products({ userProfile }: ProductsProps) {
       } else {
         const docRef = await addDoc(collection(db, 'products'), {
           ...formData,
+          createdAt: new Date().toISOString(),
           ownerId,
           userId: userProfile?.uid || ownerId
         });

@@ -16,6 +16,7 @@ export interface Product {
   expirationDate?: string;
   lowStockAlert?: number;
   ownerId?: string;
+  createdAt?: string;
 }
 
 export interface Client {
