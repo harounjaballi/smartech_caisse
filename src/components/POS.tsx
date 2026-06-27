@@ -38,6 +38,8 @@ export default function POS({ userProfile }: POSProps) {
   const [scannerActive, setScannerActive] = useState(true);
   const [scanNotification, setScanNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [manualCode, setManualCode] = useState('');
+  const [editingQtyId, setEditingQtyId] = useState<string | null>(null);
+  const [editingQtyValue, setEditingQtyValue] = useState<string>('');
 
   const handlePrint = () => {
     console.log('Impression du ticket en cours...', lastInvoice);
@@ -297,6 +299,25 @@ export default function POS({ userProfile }: POSProps) {
 
   const removeFromCart = (productId: string) => {
     setCart(prev => prev.filter(item => item.productId !== productId));
+  };
+
+  const setQuantityDirect = (productId: string, newQty: number) => {
+    const product = products.find(p => p.id === productId);
+    if (!product) return;
+    if (newQty < 1) {
+      removeFromCart(productId);
+      return;
+    }
+    if (newQty > product.stock) {
+      setError(`Stock insuffisant pour ${product.name} (Disponible: ${product.stock})`);
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+    setCart(prev => prev.map(item =>
+      item.productId === productId
+        ? { ...item, quantity: newQty, total: newQty * item.price }
+        : item
+    ));
   };
 
   const subtotal = useMemo(() => {
@@ -913,7 +934,53 @@ export default function POS({ userProfile }: POSProps) {
                             >
                               <Minus className="w-3 h-3" />
                             </button>
-                            <span className="w-6 text-xs sm:text-sm font-black text-slate-850 font-mono text-center select-none">{item.quantity}</span>
+
+                            {editingQtyId === item.productId ? (
+                              <input
+                                type="number"
+                                min="1"
+                                autoFocus
+                                value={editingQtyValue}
+                                onChange={(e) => setEditingQtyValue(e.target.value)}
+                                onBlur={() => {
+                                  const parsed = parseInt(editingQtyValue);
+                                  if (!isNaN(parsed) && parsed > 0) {
+                                    setQuantityDirect(item.productId, parsed);
+                                  }
+                                  setEditingQtyId(null);
+                                  setEditingQtyValue('');
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    const parsed = parseInt(editingQtyValue);
+                                    if (!isNaN(parsed) && parsed > 0) {
+                                      setQuantityDirect(item.productId, parsed);
+                                    }
+                                    setEditingQtyId(null);
+                                    setEditingQtyValue('');
+                                    e.preventDefault();
+                                  }
+                                  if (e.key === 'Escape') {
+                                    setEditingQtyId(null);
+                                    setEditingQtyValue('');
+                                  }
+                                  e.stopPropagation();
+                                }}
+                                className="w-10 text-xs font-black text-slate-900 font-mono text-center bg-white border border-indigo-400 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500/30 px-1 py-0.5"
+                              />
+                            ) : (
+                              <span
+                                onClick={() => {
+                                  setEditingQtyId(item.productId);
+                                  setEditingQtyValue(String(item.quantity));
+                                }}
+                                className="w-8 text-xs sm:text-sm font-black text-slate-850 font-mono text-center cursor-pointer hover:bg-indigo-50 hover:text-indigo-600 rounded px-1 py-0.5 transition-colors select-none border border-transparent hover:border-indigo-200"
+                                title="Cliquer pour modifier la quantité"
+                              >
+                                {item.quantity}
+                              </span>
+                            )}
+
                             <button 
                               onClick={() => updateQuantity(item.productId, 1)}
                               disabled={(() => {
