@@ -97,39 +97,56 @@ export default function Sales({ userProfile }: SalesProps) {
 
       } else {
         // --- ONLINE DELETE FLOW ---
+        // Firestore rule: ALL reads must happen before ANY write inside a transaction
         await runTransaction(db, async (transaction) => {
+
+          // ── PHASE 1 : ALL READS ──────────────────────────────────────────
           const saleRef = doc(db, 'sales', saleToDelete.id);
           const saleSnap = await transaction.get(saleRef);
           if (!saleSnap.exists()) throw new Error("Cette vente n'existe plus.");
 
-          // Revert stock
-          for (const item of saleToDelete.items) {
-            const productRef = doc(db, 'products', item.productId);
-            const productSnap = await transaction.get(productRef);
-            if (productSnap.exists()) {
-              const currentStock = productSnap.data().stock || 0;
-              transaction.update(productRef, { stock: currentStock + item.quantity });
-            }
-          }
+          // Read all product snaps
+          const productRefs = saleToDelete.items.map(item => doc(db, 'products', item.productId));
+          const productSnaps = await Promise.all(productRefs.map(ref => transaction.get(ref)));
 
-          // Revert client debt
+          // Read client snap if needed
+          let clientSnap = null;
+          let clientRef = null;
           if (saleToDelete.clientId && saleToDelete.debt > 0) {
-            const clientRef = doc(db, 'clients', saleToDelete.clientId);
-            const clientSnap = await transaction.get(clientRef);
-            if (clientSnap.exists()) {
-              const currentDebt = clientSnap.data().debt || 0;
-              transaction.update(clientRef, { debt: Math.max(0, currentDebt - saleToDelete.debt) });
-            }
+            clientRef = doc(db, 'clients', saleToDelete.clientId);
+            clientSnap = await transaction.get(clientRef);
           }
 
-          // Read and delete invoice
+          // Read invoice snap if needed
+          let invoiceRef = null;
           let invoiceNumber = 'N/A';
           if (saleToDelete.invoiceId) {
-            const invoiceRef = doc(db, 'invoices', saleToDelete.invoiceId);
+            invoiceRef = doc(db, 'invoices', saleToDelete.invoiceId);
             const invoiceSnap = await transaction.get(invoiceRef);
             if (invoiceSnap.exists()) {
               invoiceNumber = invoiceSnap.data().number || 'N/A';
             }
+          }
+
+          // ── PHASE 2 : ALL WRITES ─────────────────────────────────────────
+
+          // Revert stock for each product
+          saleToDelete.items.forEach((item, idx) => {
+            const snap = productSnaps[idx];
+            if (snap.exists()) {
+              const currentStock = snap.data().stock || 0;
+              transaction.update(productRefs[idx], { stock: currentStock + item.quantity });
+            }
+          });
+
+          // Revert client debt
+          if (clientRef && clientSnap && clientSnap.exists()) {
+            const currentDebt = clientSnap.data().debt || 0;
+            transaction.update(clientRef, { debt: Math.max(0, currentDebt - saleToDelete.debt) });
+          }
+
+          // Delete invoice
+          if (invoiceRef) {
             transaction.delete(invoiceRef);
           }
 
