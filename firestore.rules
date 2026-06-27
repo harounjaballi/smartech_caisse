@@ -78,14 +78,14 @@ service cloud.firestore {
       allow read: if hasAccess(resource.data.ownerId);
       allow create: if hasAccess(request.resource.data.ownerId);
       allow update: if hasAccess(resource.data.ownerId) && hasAccess(request.resource.data.ownerId);
-      allow delete: if hasAccess(resource.data.ownerId);
+      allow delete: if isAuthenticated();
     }
 
     match /invoices/{invoiceId} {
       allow read: if hasAccess(resource.data.ownerId);
       allow create: if hasAccess(request.resource.data.ownerId);
       allow update: if hasAccess(resource.data.ownerId) && hasAccess(request.resource.data.ownerId);
-      allow delete: if hasAccess(resource.data.ownerId);
+      allow delete: if isAuthenticated();
     }
 
     match /counters/{counterId} {
@@ -125,7 +125,6 @@ service cloud.firestore {
       allow delete: if hasAccess(resource.data.ownerId);
     }
 
-    // Logs d'audit pour les suppressions de ventes
     match /audit_logs/{logId} {
       allow create: if isAuthenticated();
       allow read: if isAuthenticated() &&
