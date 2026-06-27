@@ -940,6 +940,7 @@ export default function POS({ userProfile }: POSProps) {
                                 type="number"
                                 min="1"
                                 autoFocus
+                                onFocus={(e) => e.target.select()}
                                 value={editingQtyValue}
                                 onChange={(e) => setEditingQtyValue(e.target.value)}
                                 onBlur={() => {
