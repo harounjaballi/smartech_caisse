@@ -400,21 +400,20 @@ export default function Sales({ userProfile }: SalesProps) {
                       <div className="flex items-center justify-end gap-2">
                         <button
                           onClick={(e) => { e.stopPropagation(); setSelectedSale(sale); }}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors"
                         >
                           <Eye className="w-3.5 h-3.5" />
                           Voir
                         </button>
 
-                        {userProfile?.role === 'admin' && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setSaleToDelete(sale); }}
-                            className="inline-flex items-center gap-1.5 p-1.5 text-[10px] font-black uppercase tracking-wider text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
-                            title="Supprimer cette vente"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setSaleToDelete(sale); }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors border border-red-100"
+                          title="Supprimer cette vente"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Supprimer
+                        </button>
                       </div>
                     </td>
                   </tr>
