@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { doc, onSnapshot, setDoc, collection, getDocs, query, where, deleteDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 import { StoreSettings, UserProfile } from '../types';
 import { handleFirestoreError, OperationType, hasMenuAccess } from '../App';
-import { Edit2, X, Settings as SettingsIcon, CheckCircle2, Store, Save, Download, Trash2, Database, AlertTriangle, Calendar, Shield, Eye, EyeOff } from 'lucide-react';
+import { Edit2, X, Settings as SettingsIcon, CheckCircle2, Store, Save, Download, Trash2, Database, AlertTriangle, Calendar, Shield, Eye, EyeOff, Mail, RefreshCw, Lock } from 'lucide-react';
 import { cn } from '../lib/utils';
 import * as XLSX from 'xlsx';
 
@@ -43,6 +43,16 @@ export default function Settings({ userProfile }: SettingsProps) {
     deleteCode: ''
   });
   const [showDeleteCode, setShowDeleteCode] = useState(false);
+
+  // OTP flow for changing deleteCode
+  const [otpStep, setOtpStep] = useState<'idle' | 'sending' | 'verify' | 'change'>('idle');
+  const [otpCode, setOtpCode] = useState('');
+  const [otpInput, setOtpInput] = useState('');
+  const [otpError, setOtpError] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  const [newDeleteCode, setNewDeleteCode] = useState('');
+  const [showNewCode, setShowNewCode] = useState(false);
+  const [otpExpiry, setOtpExpiry] = useState<number | null>(null);
 
   // Database maintenance states
   const [isExporting, setIsExporting] = useState(false);
@@ -381,42 +391,197 @@ export default function Settings({ userProfile }: SettingsProps) {
                 </div>
 
                 {/* Code de sécurité suppression */}
-                <div className="p-4 bg-rose-50/50 rounded-2xl border border-rose-100 space-y-2">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Shield className="w-4 h-4 text-rose-500" />
-                    <label className="text-[10px] font-black text-rose-600 uppercase tracking-widest block">
-                      Code de sécurité (suppression de ventes)
-                    </label>
+                <div className="p-4 bg-rose-50/50 rounded-2xl border border-rose-100 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Shield className="w-4 h-4 text-rose-500" />
+                      <label className="text-[10px] font-black text-rose-600 uppercase tracking-widest">
+                        Code de sécurité (suppression de ventes)
+                      </label>
+                    </div>
                   </div>
                   <p className="text-[10px] text-slate-400 font-medium leading-relaxed">
-                    Ce code à 4 chiffres sera demandé avant toute suppression dans l'historique des ventes.
+                    Ce code à 4 chiffres sera demandé avant toute suppression dans l'historique des ventes. Pour le modifier, un code de vérification sera envoyé à votre email.
                   </p>
-                  <div className="relative">
-                    <Shield className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-rose-400" />
-                    <input
-                      type={showDeleteCode ? 'text' : 'password'}
-                      maxLength={4}
-                      value={storeFormData.deleteCode}
-                      onChange={(e) => {
-                        const val = e.target.value.replace(/\D/g, '').slice(0, 4);
-                        setStoreFormData({ ...storeFormData, deleteCode: val });
-                      }}
-                      placeholder="Ex: 1234"
-                      className="w-full pl-9 pr-10 py-2.5 bg-white border border-rose-200 rounded-xl text-sm font-mono font-bold text-slate-800 outline-none focus:ring-2 focus:ring-rose-500/10 focus:border-rose-500 tracking-widest"
-                    />
+
+                  {/* Affichage du code actuel masqué */}
+                  {storeFormData.deleteCode && otpStep === 'idle' && (
+                    <div className="flex items-center justify-between bg-white border border-rose-100 rounded-xl px-4 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <Lock className="w-4 h-4 text-slate-400" />
+                        <span className="font-mono font-black text-slate-700 tracking-widest text-sm">
+                          {showDeleteCode ? storeFormData.deleteCode : '● ● ● ●'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button type="button" onClick={() => setShowDeleteCode(!showDeleteCode)} className="text-slate-400 hover:text-slate-600">
+                          {showDeleteCode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setOtpStep('sending');
+                            setOtpError('');
+                            try {
+                              const uid = userProfile?.uid || auth.currentUser?.uid || '';
+                              const res = await fetch('/api/otp/send', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ uid })
+                              });
+                              const data = await res.json();
+                              if (!res.ok) throw new Error(data.error || 'Erreur envoi');
+                              setOtpSent(true);
+                              setOtpStep('verify');
+                            } catch (err: any) {
+                              setOtpError(err.message || 'Erreur lors de l'envoi');
+                              setOtpStep('idle');
+                            }
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-100 hover:bg-rose-200 text-rose-700 text-[10px] font-black uppercase tracking-wider rounded-lg transition-colors"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          Modifier
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Pas de code encore */}
+                  {!storeFormData.deleteCode && otpStep === 'idle' && (
                     <button
                       type="button"
-                      onClick={() => setShowDeleteCode(!showDeleteCode)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                      onClick={() => {
+                        setOtpStep('change');
+                        setOtpError('');
+                        setNewDeleteCode('');
+                      }}
+                      className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-colors flex items-center justify-center gap-2"
                     >
-                      {showDeleteCode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      <Shield className="w-4 h-4" />
+                      Définir un code de sécurité
                     </button>
-                  </div>
-                  {storeFormData.deleteCode.length > 0 && storeFormData.deleteCode.length < 4 && (
-                    <p className="text-[10px] text-rose-500 font-bold">Le code doit contenir exactement 4 chiffres.</p>
                   )}
-                  {storeFormData.deleteCode.length === 4 && (
-                    <p className="text-[10px] text-emerald-600 font-bold">✓ Code valide</p>
+
+                  {/* Étape envoi OTP */}
+                  {otpStep === 'sending' && (
+                    <div className="flex items-center justify-center gap-2 py-3 text-rose-600 font-bold text-xs">
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      Envoi du code par email...
+                    </div>
+                  )}
+
+                  {/* Étape vérification OTP */}
+                  {otpStep === 'verify' && (
+                    <div className="space-y-3 animate-in fade-in duration-200">
+                      <div className="flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2.5">
+                        <Mail className="w-4 h-4 shrink-0" />
+                        <span className="font-bold">Code envoyé à <span className="font-black">{userProfile?.email || auth.currentUser?.email}</span></span>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">Code reçu par email (6 chiffres)</label>
+                        <input
+                          type="text"
+                          maxLength={6}
+                          inputMode="numeric"
+                          autoFocus
+                          value={otpInput}
+                          onChange={(e) => { setOtpInput(e.target.value.replace(/[^0-9]/g, '').slice(0, 6)); setOtpError(''); }}
+                          placeholder="● ● ● ● ● ●"
+                          className={`w-full px-4 py-3 border-2 rounded-xl text-center text-xl font-mono font-black tracking-[0.5em] outline-none transition-colors ${
+                            otpError ? 'border-red-400 bg-red-50 text-red-700' : 'border-slate-200 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/10'
+                          }`}
+                        />
+                        {otpError && <p className="text-[10px] text-red-600 font-bold mt-1">{otpError}</p>}
+                      </div>
+                      <div className="flex gap-2">
+                        <button type="button" onClick={() => { setOtpStep('idle'); setOtpInput(''); setOtpError(''); }}
+                          className="flex-1 py-2 bg-slate-100 text-slate-700 text-xs font-bold rounded-xl hover:bg-slate-200 transition-colors uppercase tracking-wider">
+                          Annuler
+                        </button>
+                        <button type="button"
+                          disabled={otpInput.length !== 6}
+                          onClick={() => {
+                            try {
+                              const uid = userProfile?.uid || auth.currentUser?.uid || '';
+                              const res = await fetch('/api/otp/verify', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ uid, otp: otpInput })
+                              });
+                              const data = await res.json();
+                              if (!res.ok) {
+                                setOtpError(data.error || 'Code incorrect');
+                                setOtpInput('');
+                              } else {
+                                setOtpStep('change');
+                                setOtpInput('');
+                                setOtpError('');
+                                setNewDeleteCode('');
+                              }
+                            } catch {
+                              setOtpError('Erreur de vérification');
+                              setOtpInput('');
+                            }
+                          }}
+                          className="flex-1 py-2 bg-rose-600 text-white text-xs font-bold rounded-xl hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors uppercase tracking-wider">
+                          Vérifier
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Étape saisie du nouveau code */}
+                  {otpStep === 'change' && (
+                    <div className="space-y-3 animate-in fade-in duration-200">
+                      <div className="flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2.5">
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        <span className="font-bold">Identité vérifiée — définissez votre nouveau code</span>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">Nouveau code (4 chiffres)</label>
+                        <div className="relative">
+                          <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-rose-400" />
+                          <input
+                            type={showNewCode ? 'text' : 'password'}
+                            maxLength={4}
+                            inputMode="numeric"
+                            autoFocus
+                            value={newDeleteCode}
+                            onChange={(e) => setNewDeleteCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))}
+                            placeholder="● ● ● ●"
+                            className="w-full pl-9 pr-10 py-3 border-2 border-rose-200 rounded-xl text-center text-xl font-mono font-black tracking-[0.5em] outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-500/10"
+                          />
+                          <button type="button" onClick={() => setShowNewCode(!showNewCode)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                            {showNewCode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                        {newDeleteCode.length > 0 && newDeleteCode.length < 4 && (
+                          <p className="text-[10px] text-rose-500 font-bold mt-1">Le code doit contenir exactement 4 chiffres.</p>
+                        )}
+                        {newDeleteCode.length === 4 && (
+                          <p className="text-[10px] text-emerald-600 font-bold mt-1">✓ Code valide</p>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        <button type="button" onClick={() => { setOtpStep('idle'); setNewDeleteCode(''); }}
+                          className="flex-1 py-2 bg-slate-100 text-slate-700 text-xs font-bold rounded-xl hover:bg-slate-200 transition-colors uppercase tracking-wider">
+                          Annuler
+                        </button>
+                        <button type="button"
+                          disabled={newDeleteCode.length !== 4}
+                          onClick={() => {
+                            setStoreFormData({ ...storeFormData, deleteCode: newDeleteCode });
+                            setOtpStep('idle');
+                            setNewDeleteCode('');
+                            setOtpCode('');
+                            setOtpInput('');
+                          }}
+                          className="flex-1 py-2 bg-emerald-600 text-white text-xs font-bold rounded-xl hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors uppercase tracking-wider">
+                          Enregistrer le code
+                        </button>
+                      </div>
+                    </div>
                   )}
                 </div>
 
