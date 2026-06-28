@@ -1,4 +1,5 @@
 import express from "express";
+import nodemailer from "nodemailer";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import cors from "cors";
@@ -207,6 +208,87 @@ async function startServer() {
     doc.fontSize(8).text("Merci de votre confiance !", { align: "center" });
 
     doc.end();
+  });
+
+  // ── OTP SEND ENDPOINT ──────────────────────────────────────────────────
+  app.post("/api/otp/send", async (req, res) => {
+    try {
+      const { uid } = req.body;
+      if (!uid) return res.status(400).json({ error: "uid requis" });
+
+      // Get user email from Firebase Auth
+      const userRecord = await adminAuth.getUser(uid);
+      const email = userRecord.email;
+      if (!email) return res.status(400).json({ error: "Email introuvable" });
+
+      // Generate 6-digit OTP
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
+
+      // Store OTP in Firestore
+      await adminDb.collection("otp_codes").doc(uid).set({
+        otp,
+        expiresAt,
+        email,
+        createdAt: new Date().toISOString()
+      });
+
+      // Send email via nodemailer (Gmail)
+      const transporter = nodemailer.createTransport({
+        service: "gmail",
+        auth: {
+          user: process.env.GMAIL_USER || "",
+          pass: process.env.GMAIL_APP_PASSWORD || ""
+        }
+      });
+
+      await transporter.sendMail({
+        from: `"SmarTech Caisse" <${process.env.GMAIL_USER}>`,
+        to: email,
+        subject: "Code de vérification - SmarTech Caisse",
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px; background: #f8fafc; border-radius: 12px;">
+            <h2 style="color: #1e293b; margin-bottom: 8px;">Code de vérification</h2>
+            <p style="color: #64748b; margin-bottom: 24px;">Vous avez demandé à modifier votre code de sécurité.</p>
+            <div style="background: #fff; border: 2px solid #e2e8f0; border-radius: 12px; padding: 24px; text-align: center; margin-bottom: 24px;">
+              <p style="color: #94a3b8; font-size: 12px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 2px;">Votre code</p>
+              <span style="font-size: 36px; font-weight: 900; letter-spacing: 12px; color: #e11d48; font-family: monospace;">${otp}</span>
+            </div>
+            <p style="color: #94a3b8; font-size: 12px;">Ce code expire dans <strong>5 minutes</strong>. Ne le partagez avec personne.</p>
+          </div>
+        `
+      });
+
+      res.json({ success: true, email: email.replace(/(.{2}).*(@.*)/, "$1***$2") });
+    } catch (err: any) {
+      console.error("[OTP SEND]", err);
+      res.status(500).json({ error: err.message || "Erreur envoi OTP" });
+    }
+  });
+
+  app.post("/api/otp/verify", async (req, res) => {
+    try {
+      const { uid, otp } = req.body;
+      if (!uid || !otp) return res.status(400).json({ error: "Paramètres manquants" });
+
+      const snap = await adminDb.collection("otp_codes").doc(uid).get();
+      if (!snap.exists) return res.status(400).json({ error: "Aucun code trouvé" });
+
+      const data = snap.data()!;
+      if (Date.now() > data.expiresAt) {
+        await adminDb.collection("otp_codes").doc(uid).delete();
+        return res.status(400).json({ error: "Code expiré" });
+      }
+      if (otp !== data.otp) {
+        return res.status(400).json({ error: "Code incorrect" });
+      }
+
+      // OTP valid — delete it
+      await adminDb.collection("otp_codes").doc(uid).delete();
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // Vite middleware for development
