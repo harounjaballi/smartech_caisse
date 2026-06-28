@@ -400,17 +400,21 @@ export default function Clients({ userProfile }: ClientsProps) {
       {isSettleModalOpen && settlingClient && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-gray-100">
+
+            {/* Header */}
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-emerald-50/50">
               <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                 <Coins className="w-5 h-5 text-emerald-600" />
                 Règlement de Dette
               </h2>
-              <button onClick={closeSettleModal} className="p-2 text-gray-400 hover:text-gray-650 rounded-lg">
+              <button onClick={closeSettleModal} className="p-2 text-gray-400 hover:text-gray-600 rounded-lg">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSettleSubmit} className="p-6 space-y-4">
+            <div className="p-6 space-y-5">
+
+              {/* Client info + dette */}
               <div className="bg-slate-50 p-4 rounded-xl space-y-2 border border-slate-100/50">
                 <div className="flex justify-between items-center text-xs">
                   <span className="text-slate-400 font-bold uppercase tracking-wider">Client</span>
@@ -422,25 +426,66 @@ export default function Clients({ userProfile }: ClientsProps) {
                     <span className="font-mono text-slate-600">{settlingClient.code}</span>
                   </div>
                 )}
-                <div className="flex justify-between items-center border-t border-slate-200/60 pt-2 text-sm">
-                  <span className="text-rose-600 font-black uppercase tracking-wider">Dette Totale</span>
+                <div className="flex justify-between items-center border-t border-slate-200/60 pt-2">
+                  <span className="text-rose-600 font-black uppercase tracking-wider text-xs">Dette Totale</span>
                   <span className="font-black text-rose-600 font-mono text-xl">
                     {settlingClient.debt.toFixed(3)} {storeSettings?.currency || 'DT'}
                   </span>
                 </div>
               </div>
 
+              {/* Deux boutons de choix */}
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSettleAmountInput('');
+                    setSettleAmount(0);
+                  }}
+                  className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 transition-all text-xs font-black uppercase tracking-wider cursor-pointer
+                    ${settleAmount < settlingClient.debt && settleAmountInput !== ''
+                      ? 'border-amber-400 bg-amber-50 text-amber-700'
+                      : settleAmountInput === ''
+                        ? 'border-amber-300 bg-amber-50 text-amber-700'
+                        : 'border-slate-200 bg-white text-slate-500 hover:border-amber-300 hover:bg-amber-50/50'
+                    }`}
+                  onClick={() => {
+                    setSettleAmountInput('');
+                    setSettleAmount(0);
+                  }}
+                >
+                  <AlertCircle className="w-5 h-5" />
+                  Paiement partiel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSettleAmountInput(settlingClient.debt.toFixed(3));
+                    setSettleAmount(settlingClient.debt);
+                  }}
+                  className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 transition-all text-xs font-black uppercase tracking-wider cursor-pointer
+                    ${settleAmount >= settlingClient.debt
+                      ? 'border-emerald-400 bg-emerald-50 text-emerald-700'
+                      : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-300 hover:bg-emerald-50/50'
+                    }`}
+                >
+                  <CheckCircle className="w-5 h-5" />
+                  Solder totalement
+                </button>
+              </div>
+
+              {/* Champ de saisie du montant */}
               <div>
                 <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
-                  Montant Payé ({storeSettings?.currency || 'DT'})
+                  Montant payé ({storeSettings?.currency || 'DT'})
                 </label>
                 <div className="relative">
                   <Coins className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500" />
                   <input
                     type="text"
                     inputMode="decimal"
-                    required
                     value={settleAmountInput}
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => {
                       const value = e.target.value.replace(',', '.');
                       if (value === '' || /^\d*\.?\d*$/.test(value)) {
@@ -448,51 +493,35 @@ export default function Clients({ userProfile }: ClientsProps) {
                         setSettleAmount(parseFloat(value) || 0);
                       }
                     }}
-                    placeholder="0.00"
-                    className="w-full pl-9 pr-24 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-emerald-500/10 focus:border-emerald-500 shadow-sm"
+                    placeholder="Saisissez le montant..."
+                    className="w-full pl-9 pr-4 py-3 bg-white border-2 border-slate-200 rounded-xl text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-emerald-500/10 focus:border-emerald-500 shadow-sm transition-colors"
                   />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSettleAmountInput(settlingClient.debt.toFixed(3));
-                      setSettleAmount(settlingClient.debt);
-                    }}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10px] font-black uppercase tracking-wider rounded-lg border border-emerald-100 transition-colors"
-                  >
-                    Tout solder
-                  </button>
                 </div>
               </div>
 
-              {settleAmount > 0 && settleAmount < settlingClient.debt ? (
-                <div className="p-4 bg-amber-50/50 rounded-xl border border-amber-100/70 space-y-3 animate-in fade-in duration-200">
-                  <div className="flex items-center gap-1.5 text-amber-700 font-bold">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span className="text-[10px] font-black uppercase tracking-wider">Montant inférieur à la dette globale</span>
+              {/* Résumé dynamique */}
+              {settleAmount > 0 && settleAmount < settlingClient.debt && (
+                <div className="p-4 bg-amber-50 rounded-xl border border-amber-200 space-y-2">
+                  <div className="flex justify-between items-center text-xs text-amber-700 font-bold uppercase tracking-wider">
+                    <span>Montant payé</span>
+                    <span className="font-mono">{settleAmount.toFixed(3)} {storeSettings?.currency || 'DT'}</span>
                   </div>
-                  <p className="text-xs text-amber-700 leading-normal">
-                    Le montant payé est inférieur au total de la dette. La dette restante après ce règlement sera de :
-                  </p>
-                  <div className="flex justify-between items-center text-base font-black text-amber-950 font-mono bg-amber-100/40 p-2.5 rounded-xl border border-amber-250/30">
-                    <span>Reste de la dette:</span>
-                    <span>{(settlingClient.debt - settleAmount).toFixed(3)} {storeSettings?.currency || 'DT'}</span>
+                  <div className="flex justify-between items-center text-sm font-black text-amber-900 border-t border-amber-200 pt-2">
+                    <span>Reste à payer</span>
+                    <span className="font-mono text-rose-600">{(settlingClient.debt - settleAmount).toFixed(3)} {storeSettings?.currency || 'DT'}</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleSettleSubmit}
-                    className="w-full py-2.5 px-4 bg-amber-600 hover:bg-amber-700 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all shadow-md shadow-amber-600/10"
-                  >
-                    Enregistrer le reste de la dette
-                  </button>
                 </div>
-              ) : settleAmount >= settlingClient.debt ? (
-                <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-100 flex items-center gap-2 text-emerald-700 animate-in fade-in duration-200">
-                  <CheckCircle className="w-4 h-4 shrink-0" />
-                  <span className="text-xs font-semibold leading-normal">La dette de ce client sera entièrement soldée.</span>
-                </div>
-              ) : null}
+              )}
 
-              <div className="pt-2 flex gap-3">
+              {settleAmount >= settlingClient.debt && settleAmount > 0 && (
+                <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 flex items-center gap-2 text-emerald-700">
+                  <CheckCircle className="w-4 h-4 shrink-0" />
+                  <span className="text-xs font-bold">La dette sera entièrement soldée ✓</span>
+                </div>
+              )}
+
+              {/* Boutons action */}
+              <div className="flex gap-3 pt-1">
                 <button
                   type="button"
                   onClick={closeSettleModal}
@@ -501,14 +530,15 @@ export default function Clients({ userProfile }: ClientsProps) {
                   Annuler
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={handleSettleSubmit}
                   disabled={settleAmount <= 0}
-                  className="flex-1 px-4 py-2.5 bg-indigo-600 text-white text-xs font-bold rounded-xl hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-lg shadow-indigo-600/15 uppercase tracking-wider"
+                  className="flex-1 px-4 py-2.5 bg-emerald-600 text-white text-xs font-bold rounded-xl hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-lg shadow-emerald-600/15 uppercase tracking-wider"
                 >
-                  Valider
+                  Valider le paiement
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
