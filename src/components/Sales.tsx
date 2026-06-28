@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, orderBy, limit, doc, getDoc, where, deleteDoc, setDoc, updateDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, limit, doc, getDoc, where, deleteDoc, setDoc, updateDoc, runTransaction, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Sale, Invoice, UserProfile } from '../types';
+import { Sale, Invoice, UserProfile, StoreSettings } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
-import { Search, Calendar, User, ShoppingBag, Eye, X, Printer, Download, TrendingUp, Receipt, AlertCircle, CheckCircle2, Clock, Trash2 } from 'lucide-react';
+import { Search, Calendar, User, ShoppingBag, Eye, X, Printer, Download, TrendingUp, Receipt, AlertCircle, CheckCircle2, Clock, Trash2, Shield, EyeOff } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { cn } from '../lib/utils';
@@ -22,6 +22,12 @@ export default function Sales({ userProfile }: SalesProps) {
 
   // Deletion states
   const [saleToDelete, setSaleToDelete] = useState<Sale | null>(null);
+  const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
+  const [showSecurityModal, setShowSecurityModal] = useState(false);
+  const [securityCode, setSecurityCode] = useState('');
+  const [securityError, setSecurityError] = useState(false);
+  const [showSecurityInput, setShowSecurityInput] = useState(false);
+  const [pendingDeleteSale, setPendingDeleteSale] = useState<Sale | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   const ownerId = userProfile?.ownerId || userProfile?.uid || 'no_user_auth';
@@ -97,66 +103,79 @@ export default function Sales({ userProfile }: SalesProps) {
 
       } else {
         // --- ONLINE DELETE FLOW ---
-        // Firestore rule: ALL reads must happen before ANY write inside a transaction
-        await runTransaction(db, async (transaction) => {
+        // writeBatch : atomique mais sans les contraintes read-before-write de runTransaction
 
-          // ── PHASE 1 : ALL READS ──────────────────────────────────────────
-          const saleRef = doc(db, 'sales', saleToDelete.id);
-          const saleSnap = await transaction.get(saleRef);
-          if (!saleSnap.exists()) throw new Error("Cette vente n'existe plus.");
+        // ── PHASE 1 : READS ──────────────────────────────────────────────
+        const saleRef = doc(db, 'sales', saleToDelete.id);
+        const saleSnap = await getDoc(saleRef);
+        if (!saleSnap.exists()) throw new Error("Cette vente n'existe plus.");
 
-          // Read all product snaps
-          const productRefs = saleToDelete.items.map(item => doc(db, 'products', item.productId));
-          const productSnaps = await Promise.all(productRefs.map(ref => transaction.get(ref)));
-
-          // Read client snap if needed
-          let clientSnap = null;
-          let clientRef = null;
-          if (saleToDelete.clientId && saleToDelete.debt > 0) {
-            clientRef = doc(db, 'clients', saleToDelete.clientId);
-            clientSnap = await transaction.get(clientRef);
+        // Lire les stocks actuels
+        const productData: { ref: ReturnType<typeof doc>, newStock: number }[] = [];
+        for (const item of saleToDelete.items) {
+          const productRef = doc(db, 'products', item.productId);
+          const productSnap = await getDoc(productRef);
+          if (productSnap.exists()) {
+            const currentStock = productSnap.data().stock || 0;
+            productData.push({ ref: productRef, newStock: currentStock + item.quantity });
           }
+        }
 
-          // Read invoice snap if needed
-          let invoiceRef = null;
-          let invoiceNumber = 'N/A';
-          if (saleToDelete.invoiceId) {
-            invoiceRef = doc(db, 'invoices', saleToDelete.invoiceId);
-            const invoiceSnap = await transaction.get(invoiceRef);
-            if (invoiceSnap.exists()) {
-              invoiceNumber = invoiceSnap.data().number || 'N/A';
-            }
-          }
-
-          // ── PHASE 2 : ALL WRITES ─────────────────────────────────────────
-
-          // Revert stock for each product
-          saleToDelete.items.forEach((item, idx) => {
-            const snap = productSnaps[idx];
-            if (snap.exists()) {
-              const currentStock = snap.data().stock || 0;
-              transaction.update(productRefs[idx], { stock: currentStock + item.quantity });
-            }
-          });
-
-          // Revert client debt
-          if (clientRef && clientSnap && clientSnap.exists()) {
+        // Lire la dette client
+        let clientRef = null;
+        let newDebt = 0;
+        if (saleToDelete.clientId && saleToDelete.debt > 0) {
+          clientRef = doc(db, 'clients', saleToDelete.clientId);
+          const clientSnap = await getDoc(clientRef);
+          if (clientSnap.exists()) {
             const currentDebt = clientSnap.data().debt || 0;
-            transaction.update(clientRef, { debt: Math.max(0, currentDebt - saleToDelete.debt) });
+            newDebt = Math.max(0, currentDebt - saleToDelete.debt);
           }
+        }
 
-          // Delete invoice
-          if (invoiceRef) {
-            transaction.delete(invoiceRef);
+        // Lire la facture
+        let invoiceRef = null;
+        let invoiceNumber = 'N/A';
+        if (saleToDelete.invoiceId) {
+          invoiceRef = doc(db, 'invoices', saleToDelete.invoiceId);
+          const invoiceSnap = await getDoc(invoiceRef);
+          if (invoiceSnap.exists()) {
+            invoiceNumber = invoiceSnap.data().number || 'N/A';
           }
+        }
 
-          // Write audit log
+        // ── PHASE 2 : WRITES via writeBatch ──────────────────────────────
+        const batch = writeBatch(db);
+
+        // Restaurer stocks
+        for (const { ref, newStock } of productData) {
+          batch.update(ref, { stock: newStock });
+        }
+
+        // Restaurer dette client
+        if (clientRef) {
+          batch.update(clientRef, { debt: newDebt });
+        }
+
+        // Supprimer facture
+        if (invoiceRef) {
+          batch.delete(invoiceRef);
+        }
+
+        // Supprimer la vente
+        batch.delete(saleRef);
+
+        // Commit du batch
+        await batch.commit();
+
+        // Log d'audit séparé (optionnel, ne bloque pas la suppression)
+        try {
           const logRef = doc(collection(db, 'audit_logs'));
-          transaction.set(logRef, {
+          await setDoc(logRef, {
             action: 'DELETE_SALE',
             userEmail,
             userName,
-            timestamp: serverTimestamp(),
+            timestamp: new Date().toISOString(),
             ticketId: saleToDelete.id,
             invoiceId: saleToDelete.invoiceId || 'N/A',
             invoiceNumber,
@@ -164,10 +183,9 @@ export default function Sales({ userProfile }: SalesProps) {
             ownerId,
             userId: userProfile?.uid || ownerId
           });
-
-          // Delete sale
-          transaction.delete(saleRef);
-        });
+        } catch (logErr) {
+          console.warn('[AUDIT LOG] Failed:', logErr);
+        }
       }
 
       setSaleToDelete(null);
@@ -424,7 +442,18 @@ export default function Sales({ userProfile }: SalesProps) {
                         </button>
 
                         <button
-                          onClick={(e) => { e.stopPropagation(); setSaleToDelete(sale); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (storeSettings?.deleteCode && storeSettings.deleteCode.length === 4) {
+                              setPendingDeleteSale(sale);
+                              setSecurityCode('');
+                              setSecurityError(false);
+                              setShowSecurityInput(false);
+                              setShowSecurityModal(true);
+                            } else {
+                              setSaleToDelete(sale);
+                            }
+                          }}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors border border-red-100"
                           title="Supprimer cette vente"
                         >
@@ -563,6 +592,100 @@ export default function Sales({ userProfile }: SalesProps) {
                 <Printer className="w-4 h-4" />
                 Imprimer
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Security Code Modal */}
+      {showSecurityModal && pendingDeleteSale && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-slate-100">
+            <div className="px-6 py-4 border-b border-slate-100 bg-rose-50/50 flex items-center justify-between">
+              <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                <Shield className="w-4 h-4 text-rose-500" />
+                Code de sécurité requis
+              </h3>
+              <button onClick={() => { setShowSecurityModal(false); setPendingDeleteSale(null); }} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-xs text-slate-500 font-medium">
+                Saisissez le code de sécurité à 4 chiffres pour autoriser la suppression de cette vente.
+              </p>
+              <div className="relative">
+                <Shield className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-rose-400" />
+                <input
+                  type={showSecurityInput ? 'text' : 'password'}
+                  maxLength={4}
+                  inputMode="numeric"
+                  autoFocus
+                  value={securityCode}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 4);
+                    setSecurityCode(val);
+                    setSecurityError(false);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && securityCode.length === 4) {
+                      if (securityCode === storeSettings?.deleteCode) {
+                        setShowSecurityModal(false);
+                        setSaleToDelete(pendingDeleteSale);
+                        setPendingDeleteSale(null);
+                      } else {
+                        setSecurityError(true);
+                        setSecurityCode('');
+                      }
+                    }
+                  }}
+                  placeholder="● ● ● ●"
+                  className={`w-full pl-9 pr-10 py-3 border-2 rounded-xl text-center text-xl font-mono font-black tracking-[0.5em] outline-none transition-colors ${
+                    securityError
+                      ? 'border-red-400 bg-red-50 text-red-700 focus:border-red-500'
+                      : 'border-slate-200 bg-white text-slate-800 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/10'
+                  }`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowSecurityInput(!showSecurityInput)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  {showSecurityInput ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" /> }
+                </button>
+              </div>
+              {securityError && (
+                <p className="text-xs text-red-600 font-bold flex items-center gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  Code incorrect. Veuillez réessayer.
+                </p>
+              )}
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={() => { setShowSecurityModal(false); setPendingDeleteSale(null); setSecurityCode(''); setSecurityError(false); }}
+                  className="flex-1 px-4 py-2.5 bg-slate-100 text-slate-700 text-xs font-bold rounded-xl hover:bg-slate-200 transition-colors uppercase tracking-wider"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={() => {
+                    if (securityCode === storeSettings?.deleteCode) {
+                      setShowSecurityModal(false);
+                      setSaleToDelete(pendingDeleteSale);
+                      setPendingDeleteSale(null);
+                      setSecurityCode('');
+                      setSecurityError(false);
+                    } else {
+                      setSecurityError(true);
+                      setSecurityCode('');
+                    }
+                  }}
+                  disabled={securityCode.length !== 4}
+                  className="flex-1 px-4 py-2.5 bg-rose-600 text-white text-xs font-bold rounded-xl hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors uppercase tracking-wider"
+                >
+                  Confirmer
+                </button>
+              </div>
             </div>
           </div>
         </div>
