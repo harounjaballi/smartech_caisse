@@ -28,31 +28,37 @@ service cloud.firestore {
     // --- MATCH BLOCKS FOR COLLECTIONS ---
 
     match /users/{userId} {
+      // Un utilisateur peut créer son profil à l'inscription s'il est admin de lui-même et actif
       allow create: if isAuthenticated() && request.auth.uid == userId &&
         request.resource.data.uid == userId &&
         request.resource.data.role == "admin" &&
         request.resource.data.status == "active" &&
         request.resource.data.ownerId == userId;
 
+      // Lecture : l'utilisateur lui-même sans aucun exists/get récursif
       allow read: if isAuthenticated() && request.auth.uid == userId;
 
+      // Lecture : un autre utilisateur du même tenant, ou s'il a été créé par cet administrateur
       allow read: if isAuthenticated() && request.auth.uid != userId &&
         exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == get(/databases/$(database)/documents/users/$(userId)).data.get('ownerId', '') ||
           request.auth.uid == get(/databases/$(database)/documents/users/$(userId)).data.get('creatorId', '')
         );
 
+      // Modification : un utilisateur lui-même sans modifier rôle/statut/ownerId
       allow update: if isAuthenticated() && request.auth.uid == userId &&
         request.resource.data.role == resource.data.get('role', 'user') && 
         request.resource.data.status == resource.data.get('status', 'active') &&
         request.resource.data.ownerId == resource.data.get('ownerId', userId);
 
+      // Modification : l'administrateur ou le créateur peut tout éditer
       allow update: if isAuthenticated() && request.auth.uid != userId &&
         exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == resource.data.get('ownerId', '') ||
           request.auth.uid == resource.data.get('creatorId', '')
         );
 
+      // Suppression : seul l'administrateur du même tenant ou le créateur peut supprimer un compte collaborateur, et pas lui-même
       allow delete: if isAuthenticated() && request.auth.uid != userId &&
         exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == resource.data.get('ownerId', '') ||
@@ -78,14 +84,14 @@ service cloud.firestore {
       allow read: if hasAccess(resource.data.ownerId);
       allow create: if hasAccess(request.resource.data.ownerId);
       allow update: if hasAccess(resource.data.ownerId) && hasAccess(request.resource.data.ownerId);
-      allow delete: if isAuthenticated();
+      allow delete: if hasAccess(resource.data.ownerId);
     }
 
     match /invoices/{invoiceId} {
       allow read: if hasAccess(resource.data.ownerId);
       allow create: if hasAccess(request.resource.data.ownerId);
       allow update: if hasAccess(resource.data.ownerId) && hasAccess(request.resource.data.ownerId);
-      allow delete: if isAuthenticated();
+      allow delete: if hasAccess(resource.data.ownerId);
     }
 
     match /counters/{counterId} {
@@ -131,6 +137,11 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin';
       allow update, delete: if false;
+    }
+
+    // OTP codes — gérés uniquement par le serveur (admin SDK)
+    match /otp_codes/{uid} {
+      allow read, write: if false;
     }
   }
 }
