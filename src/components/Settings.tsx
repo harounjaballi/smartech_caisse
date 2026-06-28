@@ -3,7 +3,7 @@ import { doc, onSnapshot, setDoc, collection, getDocs, query, where, deleteDoc }
 import { db } from '../firebase';
 import { StoreSettings, UserProfile } from '../types';
 import { handleFirestoreError, OperationType, hasMenuAccess } from '../App';
-import { Edit2, X, Settings as SettingsIcon, CheckCircle2, Store, Save, Download, Trash2, Database, AlertTriangle, Calendar } from 'lucide-react';
+import { Edit2, X, Settings as SettingsIcon, CheckCircle2, Store, Save, Download, Trash2, Database, AlertTriangle, Calendar, Shield, Eye, EyeOff } from 'lucide-react';
 import { cn } from '../lib/utils';
 import * as XLSX from 'xlsx';
 
@@ -39,8 +39,10 @@ export default function Settings({ userProfile }: SettingsProps) {
     address: '',
     phone: '',
     tva: 19,
-    tvaEnabled: true
+    tvaEnabled: true,
+    deleteCode: ''
   });
+  const [showDeleteCode, setShowDeleteCode] = useState(false);
 
   // Database maintenance states
   const [isExporting, setIsExporting] = useState(false);
@@ -224,7 +226,8 @@ export default function Settings({ userProfile }: SettingsProps) {
           address: data.address || '',
           phone: data.phone || '',
           tva: data.tva !== undefined ? data.tva : 19,
-          tvaEnabled: data.tvaEnabled !== false
+          tvaEnabled: data.tvaEnabled !== false,
+          deleteCode: data.deleteCode || ''
         });
       } else {
         setStoreSettings({
@@ -240,7 +243,8 @@ export default function Settings({ userProfile }: SettingsProps) {
           address: '',
           phone: '',
           tva: 19,
-          tvaEnabled: true
+          tvaEnabled: true,
+          deleteCode: ''
         });
       }
       setLoading(false);
@@ -374,6 +378,46 @@ export default function Settings({ userProfile }: SettingsProps) {
                         : "bg-slate-50 border-slate-100 text-slate-400 cursor-not-allowed opacity-60"
                     )}
                   />
+                </div>
+
+                {/* Code de sécurité suppression */}
+                <div className="p-4 bg-rose-50/50 rounded-2xl border border-rose-100 space-y-2">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Shield className="w-4 h-4 text-rose-500" />
+                    <label className="text-[10px] font-black text-rose-600 uppercase tracking-widest block">
+                      Code de sécurité (suppression de ventes)
+                    </label>
+                  </div>
+                  <p className="text-[10px] text-slate-400 font-medium leading-relaxed">
+                    Ce code à 4 chiffres sera demandé avant toute suppression dans l'historique des ventes.
+                  </p>
+                  <div className="relative">
+                    <Shield className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-rose-400" />
+                    <input
+                      type={showDeleteCode ? 'text' : 'password'}
+                      maxLength={4}
+                      value={storeFormData.deleteCode}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\D/g, '').slice(0, 4);
+                        setStoreFormData({ ...storeFormData, deleteCode: val });
+                      }}
+                      placeholder="Ex: 1234"
+                      className="w-full pl-9 pr-10 py-2.5 bg-white border border-rose-200 rounded-xl text-sm font-mono font-bold text-slate-800 outline-none focus:ring-2 focus:ring-rose-500/10 focus:border-rose-500 tracking-widest"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowDeleteCode(!showDeleteCode)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      {showDeleteCode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  {storeFormData.deleteCode.length > 0 && storeFormData.deleteCode.length < 4 && (
+                    <p className="text-[10px] text-rose-500 font-bold">Le code doit contenir exactement 4 chiffres.</p>
+                  )}
+                  {storeFormData.deleteCode.length === 4 && (
+                    <p className="text-[10px] text-emerald-600 font-bold">✓ Code valide</p>
+                  )}
                 </div>
 
                 <div className="pt-2">
