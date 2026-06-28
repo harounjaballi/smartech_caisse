@@ -144,31 +144,27 @@ export default function Sales({ userProfile }: SalesProps) {
           }
         }
 
-        // ── PHASE 2 : WRITES via writeBatch ──────────────────────────────
-        const batch = writeBatch(db);
+        // ── PHASE 2 : WRITES séquentiels ────────────────────────────────
 
-        // Restaurer stocks
+        // Restaurer stocks (updateDoc simple, pas de batch)
         for (const { ref, newStock } of productData) {
-          batch.update(ref, { stock: newStock });
+          try { await updateDoc(ref, { stock: newStock }); } catch (e) { console.warn('stock update failed:', e); }
         }
 
         // Restaurer dette client
         if (clientRef) {
-          batch.update(clientRef, { debt: newDebt });
+          try { await updateDoc(clientRef, { debt: newDebt }); } catch (e) { console.warn('debt update failed:', e); }
         }
 
         // Supprimer facture
         if (invoiceRef) {
-          batch.delete(invoiceRef);
+          try { await deleteDoc(invoiceRef); } catch (e) { console.warn('invoice delete failed:', e); }
         }
 
-        // Supprimer la vente
-        batch.delete(saleRef);
+        // Supprimer la vente (opération principale)
+        await deleteDoc(saleRef);
 
-        // Commit du batch
-        await batch.commit();
-
-        // Log d'audit séparé (optionnel, ne bloque pas la suppression)
+        // Log d'audit (optionnel)
         try {
           const logRef = doc(collection(db, 'audit_logs'));
           await setDoc(logRef, {
@@ -442,15 +438,23 @@ export default function Sales({ userProfile }: SalesProps) {
                         </button>
 
                         <button
-                          onClick={(e) => {
+                          onClick={async (e) => {
                             e.stopPropagation();
-                            if (storeSettings?.deleteCode && storeSettings.deleteCode.length === 4) {
-                              setPendingDeleteSale(sale);
-                              setSecurityCode('');
-                              setSecurityError(false);
-                              setShowSecurityInput(false);
-                              setShowSecurityModal(true);
-                            } else {
+                            // Charger le deleteCode depuis Firestore
+                            try {
+                              const settingsSnap = await getDoc(doc(db, 'settings', ownerId));
+                              const code = settingsSnap.exists() ? settingsSnap.data().deleteCode : '';
+                              if (code && code.length === 4) {
+                                setStoreSettings(settingsSnap.data() as any);
+                                setPendingDeleteSale(sale);
+                                setSecurityCode('');
+                                setSecurityError(false);
+                                setShowSecurityInput(false);
+                                setShowSecurityModal(true);
+                              } else {
+                                setSaleToDelete(sale);
+                              }
+                            } catch {
                               setSaleToDelete(sale);
                             }
                           }}
