@@ -92,6 +92,7 @@ export interface StoreSettings {
   tva: number;
   tvaEnabled?: boolean;
   ownerId?: string;
+  deleteCode?: string;
 }
 
 export interface Note {
