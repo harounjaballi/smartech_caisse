@@ -76,74 +76,32 @@ export default function Users({ userProfile }: UsersProps) {
   const [errorOnEdit, setErrorOnEdit] = useState<string | null>(null);
 
   useEffect(() => {
-    // Query 1: users where ownerId == admin's uid (legacy sub-users)
-    const qLegacy = query(collection(db, 'users'), where('ownerId', '==', ownerId));
-    // Query 2: users where creatorId == admin's uid (new sub-users)
-    const qNew = query(collection(db, 'users'), where('creatorId', '==', ownerId));
-    // Query 3: users where ownerId == admin uid but created as admin (their ownerId = their own uid)
-    // We catch them via creatorId. But also catch any user created before creatorId field existed.
-    // Use a broader uid-based search: fetch ALL users and filter client-side.
+    // Pour un admin : récupérer TOUS les utilisateurs de la collection sans filtre.
+    // Le filtre multi-tenant (ownerId/creatorId) est inutile ici car seul l'admin
+    // accède à cette page, et il doit voir tous ses collaborateurs peu importe
+    // comment ils ont été créés (ownerId propre, creatorId manquant, etc.)
     const qAll = query(collection(db, 'users'));
 
-    let legacyUsers: UserProfile[] = [];
-    let newUsers: UserProfile[] = [];
-    let allUsers: UserProfile[] = [];
+    const unsubscribeAll = onSnapshot(qAll, (snapshot) => {
+      const allDocs = snapshot.docs.map(d => ({ ...d.data() } as UserProfile));
 
-    const updateMergedUsers = () => {
-      const mergedMap = new Map<string, UserProfile>();
-      
-      // Add from all-users query, filtering only those related to this admin
-      allUsers.forEach(u => {
-        // Include if: ownerId matches, or creatorId matches, or uid matches admin (self)
-        if (
-          u.ownerId === ownerId ||
-          u.creatorId === ownerId ||
-          u.uid === userProfile?.uid
-        ) {
-          mergedMap.set(u.uid, u);
-        }
-      });
+      console.log("[Users] Total docs in collection:", allDocs.length);
+      console.log("[Users] Docs:", allDocs.map(u => ({ uid: u.uid, email: u.email, ownerId: u.ownerId, creatorId: u.creatorId })));
+      console.log("[Users] Current admin ownerId:", ownerId, "uid:", userProfile?.uid);
 
-      // Also add from targeted queries as fallback
-      legacyUsers.forEach(u => mergedMap.set(u.uid, u));
-      newUsers.forEach(u => mergedMap.set(u.uid, u));
+      // Séparer self des autres
+      const subUsers = allDocs.filter(u => u.uid !== userProfile?.uid);
 
-      // Separate self from sub-users
-      const subUsers = Array.from(mergedMap.values()).filter(u => u.uid !== userProfile?.uid);
-
-      // Always show the current admin's own profile at the top of the list
+      // Admin en premier, puis tous les autres
       const list = userProfile ? [userProfile, ...subUsers] : subUsers;
       setUsers(list);
       setLoading(false);
-    };
-
-    const unsubscribeLegacy = onSnapshot(qLegacy, (snapshot) => {
-      legacyUsers = snapshot.docs.map(doc => ({ ...doc.data() } as UserProfile));
-      updateMergedUsers();
     }, (err) => {
-      console.error("Error loading legacy users:", err);
+      console.error("[Users] Error loading all users:", err);
       setLoading(false);
-    });
-
-    const unsubscribeNew = onSnapshot(qNew, (snapshot) => {
-      newUsers = snapshot.docs.map(doc => ({ ...doc.data() } as UserProfile));
-      updateMergedUsers();
-    }, (err) => {
-      console.error("Error loading new isolated users:", err);
-      setLoading(false);
-    });
-
-    const unsubscribeAll = onSnapshot(qAll, (snapshot) => {
-      allUsers = snapshot.docs.map(doc => ({ ...doc.data() } as UserProfile));
-      updateMergedUsers();
-    }, (err) => {
-      console.error("Error loading all users:", err);
-      // Don't block loading on this query failing
     });
 
     return () => {
-      unsubscribeLegacy();
-      unsubscribeNew();
       unsubscribeAll();
     };
   }, [ownerId, userProfile?.uid, userProfile]);
