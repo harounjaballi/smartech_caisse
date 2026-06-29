@@ -1,4 +1,4 @@
-const CACHE_NAME = 'smartech-pos-v2';
+const CACHE_NAME = 'smartech-pos-v3';
 const ASSETS = [
   '/',
   '/index.html',
@@ -39,6 +39,11 @@ self.addEventListener('fetch', (event) => {
   // Skip API or database syncing calls
   const url = new URL(event.request.url);
   if (url.pathname.includes('/api/') || url.hostname.includes('firestore.googleapis.com')) {
+    return;
+  }
+
+  // Ne jamais intercepter la page admin-panel
+  if (url.pathname.includes('admin-panel')) {
     return;
   }
 
