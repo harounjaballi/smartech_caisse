@@ -76,35 +76,43 @@ export default function Users({ userProfile }: UsersProps) {
   const [errorOnEdit, setErrorOnEdit] = useState<string | null>(null);
 
   useEffect(() => {
-    // Pour un admin : récupérer TOUS les utilisateurs de la collection sans filtre.
-    // Le filtre multi-tenant (ownerId/creatorId) est inutile ici car seul l'admin
-    // accède à cette page, et il doit voir tous ses collaborateurs peu importe
-    // comment ils ont été créés (ownerId propre, creatorId manquant, etc.)
+    if (!userProfile) return;
+
+    setLoading(true);
+
+    // Utiliser getDocs pour une lecture immédiate de TOUS les users
+    // puis onSnapshot pour les mises à jour en temps réel
     const qAll = query(collection(db, 'users'));
 
-    const unsubscribeAll = onSnapshot(qAll, (snapshot) => {
-      const allDocs = snapshot.docs.map(d => ({ ...d.data() } as UserProfile));
+    // Lecture initiale immédiate
+    getDocs(qAll).then((snapshot) => {
+      console.log("[Users DEBUG] getDocs total docs:", snapshot.size);
+      snapshot.docs.forEach(d => {
+        const data = d.data();
+        console.log("[Users DEBUG] doc:", d.id, "| email:", data.email, "| ownerId:", data.ownerId, "| creatorId:", data.creatorId);
+      });
 
-      console.log("[Users] Total docs in collection:", allDocs.length);
-      console.log("[Users] Docs:", allDocs.map(u => ({ uid: u.uid, email: u.email, ownerId: u.ownerId, creatorId: u.creatorId })));
-      console.log("[Users] Current admin ownerId:", ownerId, "uid:", userProfile?.uid);
-
-      // Séparer self des autres
-      const subUsers = allDocs.filter(u => u.uid !== userProfile?.uid);
-
-      // Admin en premier, puis tous les autres
-      const list = userProfile ? [userProfile, ...subUsers] : subUsers;
-      setUsers(list);
+      const allDocs = snapshot.docs.map(d => ({ ...d.data(), uid: d.id } as UserProfile));
+      const subUsers = allDocs.filter(u => u.uid !== userProfile.uid);
+      setUsers([userProfile, ...subUsers]);
       setLoading(false);
-    }, (err) => {
-      console.error("[Users] Error loading all users:", err);
+    }).catch(err => {
+      console.error("[Users DEBUG] getDocs error:", err.code, err.message);
       setLoading(false);
     });
 
-    return () => {
-      unsubscribeAll();
-    };
-  }, [ownerId, userProfile?.uid, userProfile]);
+    // Écoute en temps réel pour les ajouts/modifs après chargement
+    const unsub = onSnapshot(qAll, (snapshot) => {
+      console.log("[Users DEBUG] onSnapshot docs:", snapshot.size);
+      const allDocs = snapshot.docs.map(d => ({ ...d.data(), uid: d.id } as UserProfile));
+      const subUsers = allDocs.filter(u => u.uid !== userProfile.uid);
+      setUsers([userProfile, ...subUsers]);
+    }, (err) => {
+      console.error("[Users DEBUG] onSnapshot error:", err.code, err.message);
+    });
+
+    return () => unsub();
+  }, [userProfile?.uid]);
 
   const handleRoleChangeOnCreate = (role: 'admin' | 'user') => {
     setRoleInput(role);
@@ -536,9 +544,19 @@ export default function Users({ userProfile }: UsersProps) {
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
           </div>
         ) : users.length === 0 ? (
-          <div className="p-16 text-center text-slate-400 space-y-2">
+          <div className="p-8 text-center text-slate-400 space-y-3">
             <UsersIcon className="w-12 h-12 mx-auto opacity-30 text-indigo-500" />
             <p className="text-sm font-bold">Aucun utilisateur trouvé</p>
+            {/* DEBUG PANEL - à supprimer après diagnostic */}
+            <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-xl text-left text-xs font-mono text-amber-800 space-y-1">
+              <p className="font-black text-amber-900">🔍 Infos de débogage :</p>
+              <p>userProfile uid: <span className="font-bold">{userProfile?.uid || 'NULL'}</span></p>
+              <p>userProfile email: <span className="font-bold">{userProfile?.email || 'NULL'}</span></p>
+              <p>userProfile ownerId: <span className="font-bold">{userProfile?.ownerId || 'NULL'}</span></p>
+              <p>ownerId calculé: <span className="font-bold">{ownerId}</span></p>
+              <p>users.length: <span className="font-bold">{users.length}</span></p>
+              <p>loading: <span className="font-bold">{loading ? 'true' : 'false'}</span></p>
+            </div>
           </div>
         ) : (
           <div className="overflow-x-auto">
