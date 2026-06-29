@@ -74,20 +74,24 @@ export default function Sales({ userProfile }: SalesProps) {
           await deleteDoc(doc(db, 'invoices', saleToDelete.invoiceId));
         }
 
-        // 4. Create Audit Log locally
-        const logRef = doc(collection(db, 'audit_logs'));
-        await setDoc(logRef, {
-          action: 'DELETE_SALE',
-          userEmail,
-          userName,
-          timestamp: new Date().toISOString(),
-          ticketId: saleToDelete.id,
-          invoiceId: saleToDelete.invoiceId || 'N/A',
-          invoiceNumber,
-          total: saleToDelete.total,
-          ownerId,
-          userId: userProfile?.uid || ownerId
-        });
+        // 4. Create Audit Log locally (optionnel — ne bloque pas la suppression)
+        try {
+          const logRef = doc(collection(db, 'audit_logs'));
+          await setDoc(logRef, {
+            action: 'DELETE_SALE',
+            userEmail,
+            userName,
+            timestamp: new Date().toISOString(),
+            ticketId: saleToDelete.id,
+            invoiceId: saleToDelete.invoiceId || 'N/A',
+            invoiceNumber,
+            total: saleToDelete.total,
+            ownerId,
+            userId: userProfile?.uid || ownerId
+          });
+        } catch (logErr) {
+          console.warn('[AUDIT LOG OFFLINE] Failed:', logErr);
+        }
 
         // 5. Delete sale locally
         await deleteDoc(doc(db, 'sales', saleToDelete.id));
