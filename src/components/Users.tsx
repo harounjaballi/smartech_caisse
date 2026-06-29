@@ -43,9 +43,10 @@ interface UsersProps {
 }
 
 export default function Users({ userProfile }: UsersProps) {
-  const [users, setUsers] = useState<UserProfile[]>([]);
+  // Initialize with the current admin's own profile so they always appear at the top
+  const [users, setUsers] = useState<UserProfile[]>(userProfile ? [userProfile] : []);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!userProfile);
   const [success, setSuccess] = useState<string | null>(null);
   const [errorOnCreate, setErrorOnCreate] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -119,7 +120,7 @@ export default function Users({ userProfile }: UsersProps) {
       unsubscribeLegacy();
       unsubscribeNew();
     };
-  }, [ownerId, userProfile?.uid]);
+  }, [ownerId, userProfile?.uid, userProfile]);
 
   const handleRoleChangeOnCreate = (role: 'admin' | 'user') => {
     setRoleInput(role);
