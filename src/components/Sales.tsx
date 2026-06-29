@@ -117,35 +117,41 @@ export default function Sales({ userProfile }: SalesProps) {
         // Lire les stocks actuels
         const productData: { ref: ReturnType<typeof doc>, newStock: number }[] = [];
         for (const item of saleToDelete.items) {
-          const productRef = doc(db, 'products', item.productId);
-          const productSnap = await getDoc(productRef);
-          if (productSnap.exists()) {
-            const currentStock = productSnap.data().stock || 0;
-            productData.push({ ref: productRef, newStock: currentStock + item.quantity });
-          }
+          try {
+            const productRef = doc(db, 'products', item.productId);
+            const productSnap = await getDoc(productRef);
+            if (productSnap.exists()) {
+              const currentStock = productSnap.data().stock || 0;
+              productData.push({ ref: productRef, newStock: currentStock + item.quantity });
+            }
+          } catch (e) { console.warn('stock read failed:', e); }
         }
 
         // Lire la dette client
         let clientRef = null;
         let newDebt = 0;
         if (saleToDelete.clientId && saleToDelete.debt > 0) {
-          clientRef = doc(db, 'clients', saleToDelete.clientId);
-          const clientSnap = await getDoc(clientRef);
-          if (clientSnap.exists()) {
-            const currentDebt = clientSnap.data().debt || 0;
-            newDebt = Math.max(0, currentDebt - saleToDelete.debt);
-          }
+          try {
+            clientRef = doc(db, 'clients', saleToDelete.clientId);
+            const clientSnap = await getDoc(clientRef);
+            if (clientSnap.exists()) {
+              const currentDebt = clientSnap.data().debt || 0;
+              newDebt = Math.max(0, currentDebt - saleToDelete.debt);
+            }
+          } catch (e) { console.warn('client debt read failed:', e); clientRef = null; }
         }
 
         // Lire la facture
         let invoiceRef = null;
         let invoiceNumber = 'N/A';
         if (saleToDelete.invoiceId) {
-          invoiceRef = doc(db, 'invoices', saleToDelete.invoiceId);
-          const invoiceSnap = await getDoc(invoiceRef);
-          if (invoiceSnap.exists()) {
-            invoiceNumber = invoiceSnap.data().number || 'N/A';
-          }
+          try {
+            invoiceRef = doc(db, 'invoices', saleToDelete.invoiceId);
+            const invoiceSnap = await getDoc(invoiceRef);
+            if (invoiceSnap.exists()) {
+              invoiceNumber = invoiceSnap.data().number || 'N/A';
+            }
+          } catch (e) { console.warn('invoice read failed:', e); invoiceRef = null; }
         }
 
         // ── PHASE 2 : WRITES séquentiels ────────────────────────────────
