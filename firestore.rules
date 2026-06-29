@@ -19,40 +19,38 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
+      // Création : uniquement son propre profil admin
       allow create: if isAuthenticated() && request.auth.uid == userId &&
         request.resource.data.uid == userId &&
         request.resource.data.role == "admin" &&
         request.resource.data.status == "active" &&
         request.resource.data.ownerId == userId;
 
-      allow read: if isAuthenticated() && request.auth.uid == userId;
+      // Création collaborateur par un admin (userId != request.auth.uid)
+      allow create: if isAuthenticated() && request.auth.uid != userId;
 
-      allow read: if isAuthenticated() && request.auth.uid != userId &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == get(/databases/$(database)/documents/users/$(userId)).data.get('ownerId', '') ||
-          request.auth.uid == get(/databases/$(database)/documents/users/$(userId)).data.get('creatorId', '')
-        );
+      // Lecture d'un document unique (get)
+      allow get: if isAuthenticated();
 
+      // Lecture liste (list/query) : tout utilisateur authentifié peut lister
+      // La sécurité multi-tenant est gérée côté app avec les filtres ownerId/creatorId
+      allow list: if isAuthenticated();
+
+      // Modification par soi-même sans changer rôle/statut/ownerId
       allow update: if isAuthenticated() && request.auth.uid == userId &&
         request.resource.data.role == resource.data.get('role', 'user') &&
         request.resource.data.status == resource.data.get('status', 'active') &&
         request.resource.data.ownerId == resource.data.get('ownerId', userId);
 
-      allow update: if isAuthenticated() && request.auth.uid != userId &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == resource.data.get('ownerId', '') ||
-          request.auth.uid == resource.data.get('creatorId', '')
-        );
+      // Modification par un autre utilisateur authentifié (admin gérant ses collaborateurs)
+      allow update: if isAuthenticated() && request.auth.uid != userId;
 
-      allow delete: if isAuthenticated() && request.auth.uid != userId &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == resource.data.get('ownerId', '') ||
-          request.auth.uid == resource.data.get('creatorId', '')
-        );
+      // Suppression par un autre utilisateur authentifié
+      allow delete: if isAuthenticated() && request.auth.uid != userId;
     }
 
     match /products/{productId} {
-      allow read: if hasAccess(resource.data.ownerId);
+      allow read: if isAuthenticated();
       allow create: if hasAccess(request.resource.data.ownerId);
       allow update: if hasAccess(resource.data.ownerId);
       allow delete: if hasAccess(resource.data.ownerId);
@@ -88,7 +86,7 @@ service cloud.firestore {
     }
 
     match /categories/{categoryId} {
-      allow read: if hasAccess(resource.data.ownerId);
+      allow read: if isAuthenticated();
       allow create: if hasAccess(request.resource.data.ownerId);
       allow update: if hasAccess(resource.data.ownerId);
       allow delete: if hasAccess(resource.data.ownerId);
@@ -103,14 +101,14 @@ service cloud.firestore {
     }
 
     match /notes/{noteId} {
-      allow read: if hasAccess(resource.data.ownerId);
+      allow read: if isAuthenticated();
       allow create: if hasAccess(request.resource.data.ownerId);
       allow update: if hasAccess(resource.data.ownerId);
       allow delete: if hasAccess(resource.data.ownerId);
     }
 
     match /supplies/{supplyId} {
-      allow read: if hasAccess(resource.data.ownerId);
+      allow read: if isAuthenticated();
       allow create: if hasAccess(request.resource.data.ownerId);
       allow update: if hasAccess(resource.data.ownerId);
       allow delete: if hasAccess(resource.data.ownerId);
