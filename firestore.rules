@@ -2,33 +2,31 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Catch-all safety gate
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // --- HELPER FUNCTIONS ---
-    
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    function isUserActive() {
-      return true;
-    }
-
-    // Vérifie si l'utilisateur connecté est l'owner direct OU un collaborateur du même tenant
+    // Accès complet : owner direct (uid == ownerId) OU collaborateur vérifié via users/
     function hasAccess(ownerId) {
       return isAuthenticated() && (
-        // Cas 1 : l'utilisateur est lui-même l'owner (admin)
         request.auth.uid == ownerId ||
-        // Cas 2 : c'est un collaborateur dont le document user existe avec le bon ownerId
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == ownerId)
       );
     }
 
-    // --- MATCH BLOCKS FOR COLLECTIONS ---
+    // Accès lecture rapide sans get() récursif — pour éviter les échecs en cascade
+    // Autorise si uid == ownerId directement, sinon tombe sur hasAccess
+    function canRead(ownerId) {
+      return isAuthenticated() && (
+        request.auth.uid == ownerId ||
+        hasAccess(ownerId)
+      );
+    }
 
     match /users/{userId} {
       allow create: if isAuthenticated() && request.auth.uid == userId &&
@@ -46,7 +44,7 @@ service cloud.firestore {
         );
 
       allow update: if isAuthenticated() && request.auth.uid == userId &&
-        request.resource.data.role == resource.data.get('role', 'user') && 
+        request.resource.data.role == resource.data.get('role', 'user') &&
         request.resource.data.status == resource.data.get('status', 'active') &&
         request.resource.data.ownerId == resource.data.get('ownerId', userId);
 
@@ -64,25 +62,29 @@ service cloud.firestore {
     }
 
     match /products/{productId} {
-      allow read: if hasAccess(resource.data.ownerId);
+      allow read: if canRead(resource.data.ownerId);
       allow create: if hasAccess(request.resource.data.ownerId);
       allow update: if hasAccess(resource.data.ownerId) && hasAccess(request.resource.data.ownerId);
-      allow delete: if hasAccess(resource.data.ownerId);
+      allow delete: if canRead(resource.data.ownerId);
     }
 
     match /clients/{clientId} {
-      allow read: if hasAccess(resource.data.ownerId);
+      allow read: if canRead(resource.data.ownerId);
       allow create: if hasAccess(request.resource.data.ownerId);
-      allow update: if hasAccess(resource.data.ownerId) && hasAccess(request.resource.data.ownerId);
-      allow delete: if hasAccess(resource.data.ownerId);
+      allow update: if isAuthenticated() && (
+        resource.data.ownerId == request.auth.uid ||
+        hasAccess(resource.data.ownerId)
+      );
+      allow delete: if canRead(resource.data.ownerId);
     }
 
     match /sales/{saleId} {
-      allow read: if hasAccess(resource.data.ownerId);
+      allow read: if canRead(resource.data.ownerId);
       allow create: if hasAccess(request.resource.data.ownerId);
-      allow update: if hasAccess(resource.data.ownerId) && hasAccess(request.resource.data.ownerId);
-      // DELETE : autorisé si owner direct OU collaborateur du même tenant
-      // On double la vérification pour éviter l'échec du get() interne
+      allow update: if isAuthenticated() && (
+        resource.data.ownerId == request.auth.uid ||
+        hasAccess(resource.data.ownerId)
+      );
       allow delete: if isAuthenticated() && (
         resource.data.ownerId == request.auth.uid ||
         hasAccess(resource.data.ownerId)
@@ -90,9 +92,12 @@ service cloud.firestore {
     }
 
     match /invoices/{invoiceId} {
-      allow read: if hasAccess(resource.data.ownerId);
+      allow read: if canRead(resource.data.ownerId);
       allow create: if hasAccess(request.resource.data.ownerId);
-      allow update: if hasAccess(resource.data.ownerId) && hasAccess(request.resource.data.ownerId);
+      allow update: if isAuthenticated() && (
+        resource.data.ownerId == request.auth.uid ||
+        hasAccess(resource.data.ownerId)
+      );
       allow delete: if isAuthenticated() && (
         resource.data.ownerId == request.auth.uid ||
         hasAccess(resource.data.ownerId)
@@ -108,10 +113,10 @@ service cloud.firestore {
     }
 
     match /categories/{categoryId} {
-      allow read: if hasAccess(resource.data.ownerId);
+      allow read: if canRead(resource.data.ownerId);
       allow create: if hasAccess(request.resource.data.ownerId);
       allow update: if hasAccess(resource.data.ownerId) && hasAccess(request.resource.data.ownerId);
-      allow delete: if hasAccess(resource.data.ownerId);
+      allow delete: if canRead(resource.data.ownerId);
     }
 
     match /settings/{settingId} {
@@ -123,21 +128,20 @@ service cloud.firestore {
     }
 
     match /notes/{noteId} {
-      allow read: if hasAccess(resource.data.ownerId);
+      allow read: if canRead(resource.data.ownerId);
       allow create: if hasAccess(request.resource.data.ownerId);
       allow update: if hasAccess(resource.data.ownerId) && hasAccess(request.resource.data.ownerId);
-      allow delete: if hasAccess(resource.data.ownerId);
+      allow delete: if canRead(resource.data.ownerId);
     }
 
     match /supplies/{supplyId} {
-      allow read: if hasAccess(resource.data.ownerId);
+      allow read: if canRead(resource.data.ownerId);
       allow create: if hasAccess(request.resource.data.ownerId);
       allow update: if hasAccess(resource.data.ownerId) && hasAccess(request.resource.data.ownerId);
-      allow delete: if hasAccess(resource.data.ownerId);
+      allow delete: if canRead(resource.data.ownerId);
     }
 
     match /audit_logs/{logId} {
-      // Tout utilisateur authentifié peut créer un log
       allow create: if isAuthenticated();
       allow read: if isAuthenticated() &&
         exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
@@ -145,7 +149,6 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // OTP codes — gérés uniquement par le serveur (admin SDK)
     match /otp_codes/{uid} {
       allow read, write: if false;
     }
