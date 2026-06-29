@@ -10,21 +10,11 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Accès complet : owner direct (uid == ownerId) OU collaborateur vérifié via users/
     function hasAccess(ownerId) {
       return isAuthenticated() && (
         request.auth.uid == ownerId ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == ownerId)
-      );
-    }
-
-    // Accès lecture rapide sans get() récursif — pour éviter les échecs en cascade
-    // Autorise si uid == ownerId directement, sinon tombe sur hasAccess
-    function canRead(ownerId) {
-      return isAuthenticated() && (
-        request.auth.uid == ownerId ||
-        hasAccess(ownerId)
       );
     }
 
@@ -62,46 +52,31 @@ service cloud.firestore {
     }
 
     match /products/{productId} {
-      allow read: if canRead(resource.data.ownerId);
+      allow read: if hasAccess(resource.data.ownerId);
       allow create: if hasAccess(request.resource.data.ownerId);
-      allow update: if hasAccess(resource.data.ownerId) && hasAccess(request.resource.data.ownerId);
-      allow delete: if canRead(resource.data.ownerId);
+      allow update: if hasAccess(resource.data.ownerId);
+      allow delete: if hasAccess(resource.data.ownerId);
     }
 
     match /clients/{clientId} {
-      allow read: if canRead(resource.data.ownerId);
+      allow read: if isAuthenticated();
       allow create: if hasAccess(request.resource.data.ownerId);
-      allow update: if isAuthenticated() && (
-        resource.data.ownerId == request.auth.uid ||
-        hasAccess(resource.data.ownerId)
-      );
-      allow delete: if canRead(resource.data.ownerId);
+      allow update: if isAuthenticated();
+      allow delete: if isAuthenticated();
     }
 
     match /sales/{saleId} {
-      allow read: if canRead(resource.data.ownerId);
+      allow read: if isAuthenticated();
       allow create: if hasAccess(request.resource.data.ownerId);
-      allow update: if isAuthenticated() && (
-        resource.data.ownerId == request.auth.uid ||
-        hasAccess(resource.data.ownerId)
-      );
-      allow delete: if isAuthenticated() && (
-        resource.data.ownerId == request.auth.uid ||
-        hasAccess(resource.data.ownerId)
-      );
+      allow update: if isAuthenticated();
+      allow delete: if isAuthenticated();
     }
 
     match /invoices/{invoiceId} {
-      allow read: if canRead(resource.data.ownerId);
+      allow read: if isAuthenticated();
       allow create: if hasAccess(request.resource.data.ownerId);
-      allow update: if isAuthenticated() && (
-        resource.data.ownerId == request.auth.uid ||
-        hasAccess(resource.data.ownerId)
-      );
-      allow delete: if isAuthenticated() && (
-        resource.data.ownerId == request.auth.uid ||
-        hasAccess(resource.data.ownerId)
-      );
+      allow update: if isAuthenticated();
+      allow delete: if isAuthenticated();
     }
 
     match /counters/{counterId} {
@@ -113,10 +88,10 @@ service cloud.firestore {
     }
 
     match /categories/{categoryId} {
-      allow read: if canRead(resource.data.ownerId);
+      allow read: if hasAccess(resource.data.ownerId);
       allow create: if hasAccess(request.resource.data.ownerId);
-      allow update: if hasAccess(resource.data.ownerId) && hasAccess(request.resource.data.ownerId);
-      allow delete: if canRead(resource.data.ownerId);
+      allow update: if hasAccess(resource.data.ownerId);
+      allow delete: if hasAccess(resource.data.ownerId);
     }
 
     match /settings/{settingId} {
@@ -128,17 +103,17 @@ service cloud.firestore {
     }
 
     match /notes/{noteId} {
-      allow read: if canRead(resource.data.ownerId);
+      allow read: if hasAccess(resource.data.ownerId);
       allow create: if hasAccess(request.resource.data.ownerId);
-      allow update: if hasAccess(resource.data.ownerId) && hasAccess(request.resource.data.ownerId);
-      allow delete: if canRead(resource.data.ownerId);
+      allow update: if hasAccess(resource.data.ownerId);
+      allow delete: if hasAccess(resource.data.ownerId);
     }
 
     match /supplies/{supplyId} {
-      allow read: if canRead(resource.data.ownerId);
+      allow read: if hasAccess(resource.data.ownerId);
       allow create: if hasAccess(request.resource.data.ownerId);
-      allow update: if hasAccess(resource.data.ownerId) && hasAccess(request.resource.data.ownerId);
-      allow delete: if canRead(resource.data.ownerId);
+      allow update: if hasAccess(resource.data.ownerId);
+      allow delete: if hasAccess(resource.data.ownerId);
     }
 
     match /audit_logs/{logId} {
