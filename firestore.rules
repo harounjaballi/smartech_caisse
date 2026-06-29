@@ -10,6 +10,10 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isAdmin() {
+      return request.auth != null && request.auth.token.email == 'harounjaballi@gmail.com';
+    }
+
     function hasAccess(ownerId) {
       return isAuthenticated() && (
         request.auth.uid == ownerId ||
@@ -32,9 +36,8 @@ service cloud.firestore {
       // Lecture d'un document unique (get)
       allow get: if isAuthenticated();
 
-      // Lecture liste (list/query) : tout utilisateur authentifié peut lister
-      // La sécurité multi-tenant est gérée côté app avec les filtres ownerId/creatorId
-      allow list: if isAuthenticated();
+      // Lecture liste : admin peut tout lister, autres utilisateurs authentifiés aussi
+      allow list: if isAuthenticated() || isAdmin();
 
       // Modification par soi-même sans changer rôle/statut/ownerId
       allow update: if isAuthenticated() && request.auth.uid == userId &&
