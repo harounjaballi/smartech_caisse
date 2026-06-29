@@ -237,9 +237,11 @@ export default function Sales({ userProfile }: SalesProps) {
   };
 
   useEffect(() => {
-    const q = query(collection(db, 'sales'), where('ownerId', '==', ownerId));
+    if (!userProfile) return;
+    const tenantOwnerId = userProfile.ownerId || userProfile.uid;
+    const q = query(collection(db, 'sales'), where('ownerId', '==', tenantOwnerId));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const sls = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Sale));
+      const sls = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Sale));
       sls.sort((a, b) => {
         const timeA = a.date?.seconds || 0;
         const timeB = b.date?.seconds || 0;
@@ -249,9 +251,10 @@ export default function Sales({ userProfile }: SalesProps) {
       setLoading(false);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'sales');
+      setLoading(false);
     });
     return unsubscribe;
-  }, [ownerId]);
+  }, [userProfile]);
 
   const filteredSales = sales.filter(s => {
     const matchSearch =
@@ -339,6 +342,9 @@ export default function Sales({ userProfile }: SalesProps) {
               placeholder="Client ou ID…"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
               className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-100 rounded-xl text-xs font-semibold text-slate-700 placeholder-slate-400 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 outline-none transition-all"
             />
           </div>
