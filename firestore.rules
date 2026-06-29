@@ -17,9 +17,12 @@ service cloud.firestore {
       return true;
     }
 
+    // Vérifie si l'utilisateur connecté est l'owner direct OU un collaborateur du même tenant
     function hasAccess(ownerId) {
       return isAuthenticated() && (
+        // Cas 1 : l'utilisateur est lui-même l'owner (admin)
         request.auth.uid == ownerId ||
+        // Cas 2 : c'est un collaborateur dont le document user existe avec le bon ownerId
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == ownerId)
       );
@@ -28,37 +31,31 @@ service cloud.firestore {
     // --- MATCH BLOCKS FOR COLLECTIONS ---
 
     match /users/{userId} {
-      // Un utilisateur peut créer son profil à l'inscription s'il est admin de lui-même et actif
       allow create: if isAuthenticated() && request.auth.uid == userId &&
         request.resource.data.uid == userId &&
         request.resource.data.role == "admin" &&
         request.resource.data.status == "active" &&
         request.resource.data.ownerId == userId;
 
-      // Lecture : l'utilisateur lui-même sans aucun exists/get récursif
       allow read: if isAuthenticated() && request.auth.uid == userId;
 
-      // Lecture : un autre utilisateur du même tenant, ou s'il a été créé par cet administrateur
       allow read: if isAuthenticated() && request.auth.uid != userId &&
         exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == get(/databases/$(database)/documents/users/$(userId)).data.get('ownerId', '') ||
           request.auth.uid == get(/databases/$(database)/documents/users/$(userId)).data.get('creatorId', '')
         );
 
-      // Modification : un utilisateur lui-même sans modifier rôle/statut/ownerId
       allow update: if isAuthenticated() && request.auth.uid == userId &&
         request.resource.data.role == resource.data.get('role', 'user') && 
         request.resource.data.status == resource.data.get('status', 'active') &&
         request.resource.data.ownerId == resource.data.get('ownerId', userId);
 
-      // Modification : l'administrateur ou le créateur peut tout éditer
       allow update: if isAuthenticated() && request.auth.uid != userId &&
         exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == resource.data.get('ownerId', '') ||
           request.auth.uid == resource.data.get('creatorId', '')
         );
 
-      // Suppression : seul l'administrateur du même tenant ou le créateur peut supprimer un compte collaborateur, et pas lui-même
       allow delete: if isAuthenticated() && request.auth.uid != userId &&
         exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == resource.data.get('ownerId', '') ||
@@ -84,14 +81,22 @@ service cloud.firestore {
       allow read: if hasAccess(resource.data.ownerId);
       allow create: if hasAccess(request.resource.data.ownerId);
       allow update: if hasAccess(resource.data.ownerId) && hasAccess(request.resource.data.ownerId);
-      allow delete: if hasAccess(resource.data.ownerId);
+      // DELETE : autorisé si owner direct OU collaborateur du même tenant
+      // On double la vérification pour éviter l'échec du get() interne
+      allow delete: if isAuthenticated() && (
+        resource.data.ownerId == request.auth.uid ||
+        hasAccess(resource.data.ownerId)
+      );
     }
 
     match /invoices/{invoiceId} {
       allow read: if hasAccess(resource.data.ownerId);
       allow create: if hasAccess(request.resource.data.ownerId);
       allow update: if hasAccess(resource.data.ownerId) && hasAccess(request.resource.data.ownerId);
-      allow delete: if hasAccess(resource.data.ownerId);
+      allow delete: if isAuthenticated() && (
+        resource.data.ownerId == request.auth.uid ||
+        hasAccess(resource.data.ownerId)
+      );
     }
 
     match /counters/{counterId} {
@@ -132,6 +137,7 @@ service cloud.firestore {
     }
 
     match /audit_logs/{logId} {
+      // Tout utilisateur authentifié peut créer un log
       allow create: if isAuthenticated();
       allow read: if isAuthenticated() &&
         exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
