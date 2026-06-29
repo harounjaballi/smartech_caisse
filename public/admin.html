@@ -56,7 +56,9 @@
   const BASE = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/${DB_ID}/documents`;
 
   async function firestoreGet(collection, pageSize = 200) {
+    // Force fresh token
     const token = await auth.currentUser.getIdToken(true);
+    console.log('[Admin] Token obtenu, longueur:', token.length);
     const res = await fetch(`${BASE}/${collection}?pageSize=${pageSize}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
@@ -186,6 +188,8 @@
   async function loadUsers() {
     $('table-body').innerHTML = `<tr><td colspan="6" class="loading-cell"><div class="spinner"></div></td></tr>`;
     try {
+      // Attendre que le token soit bien disponible
+      await new Promise(r => setTimeout(r, 500));
       allUsers = await firestoreGet('users');
       console.log('[Admin] Users chargés:', allUsers.length, allUsers.map(u => u.email));
       renderTable(allUsers);
