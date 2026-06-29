@@ -78,37 +78,20 @@ export default function Login() {
           }
         }
       } else {
-        try {
-          await signInWithEmailAndPassword(auth, email, password);
-        } catch (loginErr: any) {
-          console.warn("Standard Firebase Auth sign-in failed, trying Firestore fallback...", loginErr);
-          
-          // Check in Firestore for user with this email and password
-          const usersRef = collection(db, 'users');
-          const q = query(usersRef, where('email', '==', email), where('password', '==', password));
-          const snap = await getDocs(q);
-          
-          if (!snap.empty) {
-            const userDoc = snap.docs[0];
-            const profileData = userDoc.data();
-            
-            if (profileData.status === 'banned') {
-              throw new Error("Votre compte a été banni. Veuillez contacter l'administrateur.");
-            }
-            
-            // Save local session
-            localStorage.setItem('custom_session', JSON.stringify(profileData));
-            window.dispatchEvent(new Event('storage'));
-            window.location.reload();
-            return;
-          } else {
-            // If the service is disabled or credentials did not match:
-            if (loginErr.message && (loginErr.message.includes('identitytoolkit') || loginErr.message.includes('PERMISSION_DENIED'))) {
-              throw new Error("Identifiants incorrects ou service d'authentification temporairement indisponible.");
-            }
-            throw new Error("Email ou mot de passe incorrect.");
+        // D'abord vérifier dans Firestore si le compte est banni
+        const usersRef = collection(db, 'users');
+        const qCheck = query(usersRef, where('email', '==', email));
+        const snapCheck = await getDocs(qCheck);
+        
+        if (!snapCheck.empty) {
+          const profileData = snapCheck.docs[0].data();
+          if (profileData.status === 'banned') {
+            throw new Error("Votre compte a été banni. Veuillez contacter l'administrateur.");
           }
         }
+
+        // Connexion Firebase Auth
+        await signInWithEmailAndPassword(auth, email, password);
       }
     } catch (err: any) {
       if (err.code === 'auth/operation-not-allowed') {
