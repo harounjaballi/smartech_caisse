@@ -89,8 +89,12 @@ export default function Users({ userProfile }: UsersProps) {
       // Add new users (overwriting any overlaps)
       newUsers.forEach(u => mergedMap.set(u.uid, u));
 
-      // Filter out current logged-in user to avoid self-management if present
-      const list = Array.from(mergedMap.values()).filter(u => u.uid !== userProfile?.uid);
+      // Include all users except the current admin's own entry from sub-queries
+      // (we'll add the admin's profile separately at the top)
+      const subUsers = Array.from(mergedMap.values()).filter(u => u.uid !== userProfile?.uid);
+
+      // Always show the current admin's own profile at the top of the list
+      const list = userProfile ? [userProfile, ...subUsers] : subUsers;
       setUsers(list);
       setLoading(false);
     };
@@ -566,6 +570,7 @@ export default function Users({ userProfile }: UsersProps) {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {users.map((profile) => {
+                  const isSelf = profile.uid === userProfile?.uid;
                   const allowed = profile.allowedMenus || (
                     profile.role === 'admin'
                       ? MENU_OPTIONS.map(m => m.id)
@@ -575,7 +580,12 @@ export default function Users({ userProfile }: UsersProps) {
                   const passwordToDisplay = profile.password || 'Non spécifié';
 
                   return (
-                    <tr key={profile.uid} className="group hover:bg-slate-50/20 transition-colors">
+                    <tr key={profile.uid} className={cn(
+                      "group transition-colors",
+                      isSelf 
+                        ? "bg-indigo-50/30 hover:bg-indigo-50/50 border-l-2 border-indigo-300" 
+                        : "hover:bg-slate-50/20"
+                    )}>
                       {/* Left Block: Avatar and Email/UID info */}
                       <td className="py-4 px-6">
                         <div className="flex items-center gap-3">
@@ -588,6 +598,11 @@ export default function Users({ userProfile }: UsersProps) {
                           <div>
                             <div className="font-bold text-xs text-slate-800 flex items-center gap-1.5 leading-none">
                               {profile.name || 'Sans Nom'}
+                              {isSelf && (
+                                <span className="px-1.5 py-0.5 bg-indigo-100 text-indigo-700 text-[8px] font-black uppercase tracking-wider rounded-md border border-indigo-200">
+                                  Vous
+                                </span>
+                              )}
                             </div>
                             <span className="text-[10px] font-medium text-slate-500 mt-1 block">{profile.email}</span>
                             <div className="text-[9px] text-slate-400 font-mono mt-1 space-y-0.5">
@@ -701,6 +716,12 @@ export default function Users({ userProfile }: UsersProps) {
 
                       {/* Combined Actions: Edit, Toggle Status, Delete */}
                       <td className="py-4 px-6 text-right">
+                        {isSelf ? (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-600 text-[9px] font-black uppercase tracking-wider rounded-xl border border-indigo-100">
+                            <Shield className="w-3 h-3" />
+                            Compte principal
+                          </span>
+                        ) : (
                         <div className="flex items-center justify-end gap-2">
                           <button
                             onClick={() => handleOpenEdit(profile)}
@@ -733,6 +754,7 @@ export default function Users({ userProfile }: UsersProps) {
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
+                        )}
                       </td>
                     </tr>
                   );
