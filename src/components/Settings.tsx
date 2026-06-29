@@ -434,7 +434,7 @@ export default function Settings({ userProfile }: SettingsProps) {
                               setOtpSent(true);
                               setOtpStep('verify');
                             } catch (err: any) {
-                              setOtpError(err.message || 'Erreur lors de l'envoi');
+                              setOtpError(err.message || "Erreur lors de l'envoi");
                               setOtpStep('idle');
                             }
                           }}
