@@ -9,7 +9,7 @@
       "destination": "/api/admin/$1"
     },
     {
-      "source": "/((?!api/|assets/|favicon.ico).*)",
+      "source": "/((?!api/|assets/|favicon.ico|admin\\.html|admin).*)",
       "destination": "/index.html"
     }
   ]
