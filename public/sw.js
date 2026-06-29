@@ -1,7 +1,5 @@
-const CACHE_NAME = 'smartech-pos-v3';
+const CACHE_NAME = 'smartech-pos-v4';
 const ASSETS = [
-  '/',
-  '/index.html',
   '/manifest.json',
   '/icon.svg',
   '/icon-192.png',
@@ -31,51 +29,37 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Only handle GET requests
-  if (event.request.method !== 'GET') {
-    return;
-  }
+  if (event.request.method !== 'GET') return;
 
-  // Skip API or database syncing calls
   const url = new URL(event.request.url);
-  if (url.pathname.includes('/api/') || url.hostname.includes('firestore.googleapis.com')) {
+
+  // Ne jamais intercepter : API, Firebase, auth, admin
+  if (
+    url.pathname.includes('/api/') ||
+    url.hostname.includes('firestore.googleapis.com') ||
+    url.hostname.includes('firebase') ||
+    url.hostname.includes('googleapis.com') ||
+    url.hostname.includes('gstatic.com') ||
+    url.pathname.includes('admin')
+  ) {
     return;
   }
 
-  // Ne jamais intercepter la page admin-panel
-  if (url.pathname.includes('admin-panel')) {
-    return;
-  }
-
-  // Navigation requests (HTML pages) -> Network-First (with offline cache fallback)
-  if (event.request.mode === 'navigate' || url.pathname === '/' || url.pathname.endsWith('.html')) {
+  // Pages HTML (navigation) → toujours depuis le réseau, jamais depuis le cache
+  if (event.request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request)
-        .then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            const responseCopy = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, responseCopy);
-            });
-          }
-          return networkResponse;
-        })
-        .catch(() => {
-          return caches.match('/index.html') || caches.match(event.request);
-        })
+      fetch(event.request, { cache: 'no-store' })
+        .catch(() => caches.match('/index.html'))
     );
     return;
   }
 
-  // Static assets (JS, CSS, images, fonts) -> Cache-First (with network backup and dynamic cache)
+  // Assets statiques JS/CSS/images → Cache-First
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        return cachedResponse;
-      }
+      if (cachedResponse) return cachedResponse;
 
       return fetch(event.request).then((networkResponse) => {
-        // Cache new static assets dynamically (only same-origin assets)
         if (networkResponse && networkResponse.status === 200 && url.origin === self.location.origin) {
           const responseCopy = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
@@ -84,7 +68,6 @@ self.addEventListener('fetch', (event) => {
         }
         return networkResponse;
       }).catch(() => {
-        // Offline fallback for assets
         return new Response('Offline', { status: 503, statusText: 'Offline' });
       });
     })
