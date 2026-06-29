@@ -56,19 +56,9 @@
   };
 
   // ─── AUTH ───────────────────────────────────────────────────────
-  onAuthStateChanged(auth, async user => {
-    if (user && user.email === ADMIN_EMAIL) {
-      currentAdmin = user;
-      $('admin-email-display').textContent = user.email;
-      hide('login-screen');
-      show('admin-screen');
-      await loadUsers();
-    } else {
-      if (user) await signOut(auth); // non-admin logged in → kick out
-      show('login-screen');
-      hide('admin-screen');
-    }
-  });
+  // Toujours démarrer sur login — connexion manuelle obligatoire
+  show('login-screen');
+  hide('admin-screen');
 
   $('login-btn').addEventListener('click', async () => {
     const email = $('login-email').value.trim();
@@ -78,15 +68,30 @@
     $('login-btn').textContent = 'Connexion…';
     $('login-btn').disabled = true;
     try {
-      await signInWithEmailAndPassword(auth, email, pwd);
+      const cred = await signInWithEmailAndPassword(auth, email, pwd);
+      currentAdmin = cred.user;
+      $('admin-email-display').textContent = cred.user.email;
+      hide('login-screen');
+      show('admin-screen');
+      await loadUsers();
     } catch(e) {
-      toast('Email ou mot de passe incorrect.', 'err');
+      let msg = 'Email ou mot de passe incorrect.';
+      if (e.code === 'auth/too-many-requests') msg = 'Trop de tentatives. Réessayez plus tard.';
+      if (e.code === 'auth/network-request-failed') msg = 'Erreur réseau.';
+      if (e.code === 'auth/unauthorized-domain') msg = 'Domaine non autorisé dans Firebase Auth.';
+      console.error('[Admin Login Error]', e.code, e.message);
+      toast(msg, 'err');
       $('login-btn').textContent = 'Se connecter';
       $('login-btn').disabled = false;
     }
   });
 
-  $('logout-btn').addEventListener('click', () => signOut(auth));
+  $('logout-btn').addEventListener('click', async () => {
+    await signOut(auth);
+    currentAdmin = null;
+    show('login-screen');
+    hide('admin-screen');
+  });
 
   // ─── LOAD USERS ─────────────────────────────────────────────────
   async function loadUsers() {
