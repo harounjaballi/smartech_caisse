@@ -76,22 +76,39 @@ export default function Users({ userProfile }: UsersProps) {
   const [errorOnEdit, setErrorOnEdit] = useState<string | null>(null);
 
   useEffect(() => {
+    // Query 1: users where ownerId == admin's uid (legacy sub-users)
     const qLegacy = query(collection(db, 'users'), where('ownerId', '==', ownerId));
+    // Query 2: users where creatorId == admin's uid (new sub-users)
     const qNew = query(collection(db, 'users'), where('creatorId', '==', ownerId));
+    // Query 3: users where ownerId == admin uid but created as admin (their ownerId = their own uid)
+    // We catch them via creatorId. But also catch any user created before creatorId field existed.
+    // Use a broader uid-based search: fetch ALL users and filter client-side.
+    const qAll = query(collection(db, 'users'));
 
     let legacyUsers: UserProfile[] = [];
     let newUsers: UserProfile[] = [];
+    let allUsers: UserProfile[] = [];
 
     const updateMergedUsers = () => {
       const mergedMap = new Map<string, UserProfile>();
       
-      // Add legacy users
+      // Add from all-users query, filtering only those related to this admin
+      allUsers.forEach(u => {
+        // Include if: ownerId matches, or creatorId matches, or uid matches admin (self)
+        if (
+          u.ownerId === ownerId ||
+          u.creatorId === ownerId ||
+          u.uid === userProfile?.uid
+        ) {
+          mergedMap.set(u.uid, u);
+        }
+      });
+
+      // Also add from targeted queries as fallback
       legacyUsers.forEach(u => mergedMap.set(u.uid, u));
-      // Add new users (overwriting any overlaps)
       newUsers.forEach(u => mergedMap.set(u.uid, u));
 
-      // Include all users except the current admin's own entry from sub-queries
-      // (we'll add the admin's profile separately at the top)
+      // Separate self from sub-users
       const subUsers = Array.from(mergedMap.values()).filter(u => u.uid !== userProfile?.uid);
 
       // Always show the current admin's own profile at the top of the list
@@ -116,9 +133,18 @@ export default function Users({ userProfile }: UsersProps) {
       setLoading(false);
     });
 
+    const unsubscribeAll = onSnapshot(qAll, (snapshot) => {
+      allUsers = snapshot.docs.map(doc => ({ ...doc.data() } as UserProfile));
+      updateMergedUsers();
+    }, (err) => {
+      console.error("Error loading all users:", err);
+      // Don't block loading on this query failing
+    });
+
     return () => {
       unsubscribeLegacy();
       unsubscribeNew();
+      unsubscribeAll();
     };
   }, [ownerId, userProfile?.uid, userProfile]);
 
