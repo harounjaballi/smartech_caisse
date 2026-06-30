@@ -3,7 +3,7 @@ import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, order
 import { db } from '../firebase';
 import { Product, Category, StoreSettings, UserProfile } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
-import { Plus, Search, Edit2, Trash2, X, AlertTriangle, Package, Tag, Barcode } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, X, AlertTriangle, Package, Tag, Barcode, Shield, Eye, EyeOff, AlertCircle } from 'lucide-react';
 import { cn, decodeAzertyBarcode } from '../lib/utils';
 import { addPendingOperation } from '../lib/offlineManager';
 
@@ -28,6 +28,14 @@ export default function Products({ userProfile }: ProductsProps) {
   const [deletingCatId, setDeletingCatId] = useState<string | null>(null);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // States for security code modal (protects edit & delete)
+  const [showSecurityModal, setShowSecurityModal] = useState(false);
+  const [securityCode, setSecurityCode] = useState('');
+  const [securityError, setSecurityError] = useState(false);
+  const [showSecurityInput, setShowSecurityInput] = useState(false);
+  const [pendingAction, setPendingAction] = useState<'edit' | 'delete' | null>(null);
+  const [pendingProduct, setPendingProduct] = useState<Product | null>(null);
 
   // States for stock replenishment modal
   const [replenishProduct, setReplenishProduct] = useState<Product | null>(null);
@@ -497,6 +505,47 @@ export default function Products({ userProfile }: ProductsProps) {
     setErrorMsg(null);
   };
 
+  // Demande le code de sécurité avant d'autoriser une modification ou une suppression.
+  // Si aucun code n'est configuré dans les paramètres, l'action est exécutée directement.
+  const requestSecureAction = (action: 'edit' | 'delete', product: Product) => {
+    const code = storeSettings?.deleteCode;
+    if (code && code.length === 4) {
+      setPendingAction(action);
+      setPendingProduct(product);
+      setSecurityCode('');
+      setSecurityError(false);
+      setShowSecurityInput(false);
+      setShowSecurityModal(true);
+    } else {
+      if (action === 'edit') {
+        openModal(product);
+      } else {
+        setProductToDelete(product);
+      }
+    }
+  };
+
+  const confirmSecureAction = () => {
+    if (!pendingProduct || !pendingAction) return;
+    if (securityCode === storeSettings?.deleteCode) {
+      const action = pendingAction;
+      const product = pendingProduct;
+      setShowSecurityModal(false);
+      setPendingAction(null);
+      setPendingProduct(null);
+      setSecurityCode('');
+      setSecurityError(false);
+      if (action === 'edit') {
+        openModal(product);
+      } else {
+        setProductToDelete(product);
+      }
+    } else {
+      setSecurityError(true);
+      setSecurityCode('');
+    }
+  };
+
   const handleQuickCategoryAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCategoryName.trim()) return;
@@ -710,13 +759,13 @@ export default function Products({ userProfile }: ProductsProps) {
                         </button>
 
                         <button
-                          onClick={() => openModal(product)}
+                          onClick={() => requestSecureAction('edit', product)}
                           className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-transparent"
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => setProductToDelete(product)}
+                          onClick={() => requestSecureAction('delete', product)}
                           className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-transparent"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -1067,6 +1116,84 @@ export default function Products({ userProfile }: ProductsProps) {
               >
                 Fermer
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Security Code Modal (protects edit & delete) */}
+      {showSecurityModal && pendingProduct && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-slate-100">
+            <div className="px-6 py-4 border-b border-slate-100 bg-rose-50/50 flex items-center justify-between">
+              <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                <Shield className="w-4 h-4 text-rose-500" />
+                Code de sécurité requis
+              </h3>
+              <button
+                onClick={() => { setShowSecurityModal(false); setPendingAction(null); setPendingProduct(null); setSecurityCode(''); setSecurityError(false); }}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-xs text-slate-500 font-medium">
+                Saisissez le code de sécurité à 4 chiffres pour autoriser {pendingAction === 'edit' ? 'la modification' : 'la suppression'} du produit <strong className="text-slate-800">"{pendingProduct.name}"</strong>.
+              </p>
+              <div className="relative">
+                <Shield className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-rose-400" />
+                <input
+                  type={showSecurityInput ? 'text' : 'password'}
+                  maxLength={4}
+                  inputMode="numeric"
+                  autoFocus
+                  value={securityCode}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 4);
+                    setSecurityCode(val);
+                    setSecurityError(false);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && securityCode.length === 4) {
+                      confirmSecureAction();
+                    }
+                  }}
+                  placeholder="● ● ● ●"
+                  className={`w-full pl-9 pr-10 py-3 border-2 rounded-xl text-center text-xl font-mono font-black tracking-[0.5em] outline-none transition-colors ${
+                    securityError
+                      ? 'border-red-400 bg-red-50 text-red-700 focus:border-red-500'
+                      : 'border-slate-200 bg-white text-slate-800 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/10'
+                  }`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowSecurityInput(!showSecurityInput)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  {showSecurityInput ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" /> }
+                </button>
+              </div>
+              {securityError && (
+                <p className="text-xs text-red-600 font-bold flex items-center gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  Code incorrect. Veuillez réessayer.
+                </p>
+              )}
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={() => { setShowSecurityModal(false); setPendingAction(null); setPendingProduct(null); setSecurityCode(''); setSecurityError(false); }}
+                  className="flex-1 px-4 py-2.5 bg-slate-100 text-slate-700 text-xs font-bold rounded-xl hover:bg-slate-200 transition-colors uppercase tracking-wider"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={confirmSecureAction}
+                  className="flex-1 px-4 py-2.5 bg-rose-600 text-white text-xs font-black rounded-xl hover:bg-rose-700 transition-colors uppercase tracking-wider shadow-md shadow-rose-600/20"
+                >
+                  Valider
+                </button>
+              </div>
             </div>
           </div>
         </div>
