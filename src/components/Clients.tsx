@@ -449,10 +449,6 @@ export default function Clients({ userProfile }: ClientsProps) {
                         ? 'border-amber-300 bg-amber-50 text-amber-700'
                         : 'border-slate-200 bg-white text-slate-500 hover:border-amber-300 hover:bg-amber-50/50'
                     }`}
-                  onClick={() => {
-                    setSettleAmountInput('');
-                    setSettleAmount(0);
-                  }}
                 >
                   <AlertCircle className="w-5 h-5" />
                   Paiement partiel
