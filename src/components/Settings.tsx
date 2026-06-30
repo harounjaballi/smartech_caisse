@@ -3,7 +3,7 @@ import { doc, onSnapshot, setDoc, collection, getDocs, query, where, deleteDoc }
 import { db, auth } from '../firebase';
 import { StoreSettings, UserProfile } from '../types';
 import { handleFirestoreError, OperationType, hasMenuAccess } from '../App';
-import { Edit2, X, Settings as SettingsIcon, CheckCircle2, Store, Save, Download, Trash2, Database, AlertTriangle, Calendar, Shield, Eye, EyeOff, Mail, RefreshCw, Lock } from 'lucide-react';
+import { Edit2, X, Settings as SettingsIcon, CheckCircle2, Store, Save, Download, Trash2, Database, AlertTriangle, Calendar, Shield, Eye, EyeOff, Mail, RefreshCw, Lock, FileText } from 'lucide-react';
 import { cn } from '../lib/utils';
 import * as XLSX from 'xlsx';
 
@@ -60,6 +60,138 @@ export default function Settings({ userProfile }: SettingsProps) {
   const [purgeDate, setPurgeDate] = useState('');
   const [purgeSales, setPurgeSales] = useState(true);
   const [purgeInvoices, setPurgeInvoices] = useState(true);
+
+  // Activity log (journal d'activité) states
+  const [activityStartDate, setActivityStartDate] = useState('');
+  const [activityEndDate, setActivityEndDate] = useState('');
+  const [isGeneratingActivity, setIsGeneratingActivity] = useState(false);
+  const [activityError, setActivityError] = useState('');
+
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  const handleDownloadActivityLog = async () => {
+    setActivityError('');
+
+    if (!activityStartDate || !activityEndDate) {
+      setActivityError('Veuillez sélectionner une date de début et une date de fin.');
+      return;
+    }
+
+    const start = new Date(activityStartDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(activityEndDate);
+    end.setHours(23, 59, 59, 999);
+
+    if (end < start) {
+      setActivityError('La date de fin doit être postérieure ou égale à la date de début.');
+      return;
+    }
+
+    const diffDays = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
+    if (diffDays > 31) {
+      setActivityError('La période sélectionnée ne peut pas dépasser 1 mois (31 jours maximum).');
+      return;
+    }
+
+    setIsGeneratingActivity(true);
+    try {
+      const salesSnap = await getDocs(query(collection(db, 'sales'), where('ownerId', '==', ownerId)));
+      const invoicesSnap = await getDocs(query(collection(db, 'invoices'), where('ownerId', '==', ownerId)));
+
+      const toJsDate = (d: any): Date | null => {
+        if (!d) return null;
+        if (typeof d.toDate === 'function') return d.toDate();
+        const parsed = new Date(d);
+        return isNaN(parsed.getTime()) ? null : parsed;
+      };
+
+      const salesInRange = salesSnap.docs
+        .map(d => ({ id: d.id, ...d.data() } as any))
+        .filter(s => { const dt = toJsDate(s.date); return !!dt && dt >= start && dt <= end; })
+        .sort((a, b) => toJsDate(a.date)!.getTime() - toJsDate(b.date)!.getTime());
+
+      const invoicesInRange = invoicesSnap.docs
+        .map(d => ({ id: d.id, ...d.data() } as any))
+        .filter(inv => { const dt = toJsDate(inv.date); return !!dt && dt >= start && dt <= end; })
+        .sort((a, b) => toJsDate(a.date)!.getTime() - toJsDate(b.date)!.getTime());
+
+      if (salesInRange.length === 0 && invoicesInRange.length === 0) {
+        setActivityError('Aucune activité trouvée pour la période sélectionnée.');
+        setIsGeneratingActivity(false);
+        return;
+      }
+
+      const fmtDateTime = (dt: Date) => `${dt.toLocaleDateString('fr-FR')} ${dt.toLocaleTimeString('fr-FR')}`;
+
+      const journalVentes = salesInRange.map(s => {
+        const dt = toJsDate(s.date);
+        const itemsString = s.items ? s.items.map((it: any) => `${it.name} (${it.quantity} x ${it.price} DT)`).join(', ') : '';
+        return {
+          'Date & Heure': dt ? fmtDateTime(dt) : '',
+          'Référence': s.id,
+          'Client': s.clientName || 'Client de passage',
+          'Total TTC (DT)': s.total || 0,
+          'Payé (DT)': s.paid || 0,
+          'Dette (DT)': s.debt || 0,
+          'TVA (DT)': s.tva || 0,
+          'Facture associée': s.invoiceId || 'N/A',
+          'Détail des articles': itemsString
+        };
+      });
+
+      const journalFactures = invoicesInRange.map(inv => {
+        const dt = toJsDate(inv.date);
+        const itemsString = inv.items ? inv.items.map((it: any) => `${it.name} (${it.quantity} x ${it.price} DT)`).join(', ') : '';
+        return {
+          'Date & Heure': dt ? fmtDateTime(dt) : '',
+          'Numéro de facture': inv.number || inv.id,
+          'Client': inv.clientName || '',
+          'Téléphone': inv.clientPhone || '',
+          'Total TTC (DT)': inv.total || 0,
+          'Payé (DT)': inv.paid || 0,
+          'Dette (DT)': inv.debt || 0,
+          'TVA (DT)': inv.tva || 0,
+          'Détail des articles': itemsString
+        };
+      });
+
+      const totalCA = salesInRange.reduce((sum, s) => sum + (s.total || 0), 0);
+      const totalPaye = salesInRange.reduce((sum, s) => sum + (s.paid || 0), 0);
+      const totalDette = salesInRange.reduce((sum, s) => sum + (s.debt || 0), 0);
+      const totalTva = salesInRange.reduce((sum, s) => sum + (s.tva || 0), 0);
+
+      const resume = [
+        { 'Indicateur': 'Magasin', 'Valeur': storeFormData.storeName || 'Magasin' },
+        { 'Indicateur': 'Période', 'Valeur': `Du ${start.toLocaleDateString('fr-FR')} au ${end.toLocaleDateString('fr-FR')}` },
+        { 'Indicateur': 'Nombre de ventes', 'Valeur': salesInRange.length },
+        { 'Indicateur': 'Nombre de factures', 'Valeur': invoicesInRange.length },
+        { 'Indicateur': "Chiffre d'affaires total (DT)", 'Valeur': totalCA.toFixed(2) },
+        { 'Indicateur': 'Total encaissé (DT)', 'Valeur': totalPaye.toFixed(2) },
+        { 'Indicateur': 'Total dettes générées (DT)', 'Valeur': totalDette.toFixed(2) },
+        { 'Indicateur': 'Total TVA collectée (DT)', 'Valeur': totalTva.toFixed(2) },
+        { 'Indicateur': 'Date de génération', 'Valeur': fmtDateTime(new Date()) }
+      ];
+
+      const wb = XLSX.utils.book_new();
+      const resumeSheet = XLSX.utils.json_to_sheet(resume);
+      const ventesSheet = XLSX.utils.json_to_sheet(journalVentes);
+      const facturesSheet = XLSX.utils.json_to_sheet(journalFactures);
+
+      XLSX.utils.book_append_sheet(wb, resumeSheet, 'Résumé');
+      XLSX.utils.book_append_sheet(wb, ventesSheet, 'Ventes');
+      XLSX.utils.book_append_sheet(wb, facturesSheet, 'Factures');
+
+      const fileName = `Journal_Activite_${activityStartDate}_au_${activityEndDate}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+
+      setSuccess('Journal d\'activité téléchargé avec succès !');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, `sales|invoices/${ownerId}`);
+    } finally {
+      setIsGeneratingActivity(false);
+    }
+  };
 
   const handleExportExcel = async () => {
     setIsExporting(true);
@@ -698,8 +830,67 @@ export default function Settings({ userProfile }: SettingsProps) {
                 {isPurging ? 'Purge et allègement en cours...' : 'Purger et alléger de la base'}
               </button>
             </div>
+
+            <hr className="border-slate-100" />
+
+            {/* Rubrique 3: Journal d'activité */}
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-700">3. Journal d'activité</h3>
+                <p className="text-[11px] text-slate-400 font-medium leading-relaxed">
+                  Téléchargez un fichier détaillé de l'historique d'activité (ventes et factures) sur une période donnée. La période sélectionnée ne peut pas dépasser 1 mois.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block font-bold">Date de début</label>
+                  <div className="relative">
+                    <Calendar className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                    <input
+                      type="date"
+                      value={activityStartDate}
+                      max={todayStr}
+                      onChange={(e) => { setActivityStartDate(e.target.value); setActivityError(''); }}
+                      className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-450 transition-shadow"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block font-bold">Date de fin</label>
+                  <div className="relative">
+                    <Calendar className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                    <input
+                      type="date"
+                      value={activityEndDate}
+                      max={todayStr}
+                      onChange={(e) => { setActivityEndDate(e.target.value); setActivityError(''); }}
+                      className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-450 transition-shadow"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {activityError && (
+                <div className="p-3.5 bg-rose-50 border border-rose-100 rounded-2xl flex items-start gap-2.5 text-rose-800 text-[11px] leading-relaxed animate-in fade-in duration-300">
+                  <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                  <span className="font-semibold">{activityError}</span>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleDownloadActivityLog}
+                disabled={isGeneratingActivity || !activityStartDate || !activityEndDate}
+                className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all shadow-md shadow-indigo-600/10 active:scale-[0.99]"
+              >
+                <FileText className="w-4 h-4" />
+                {isGeneratingActivity ? 'Génération du journal...' : "Télécharger le journal d'activité (.xlsx)"}
+              </button>
+            </div>
           </div>
         </div>
+
       )}
 
       {/* Success Toast */}
