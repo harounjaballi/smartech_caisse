@@ -77,7 +77,12 @@ export default function Users({ userProfile }: UsersProps) {
   const [editRole, setEditRole] = useState<'admin' | 'user'>('user');
   const [editStatus, setEditStatus] = useState<'active' | 'banned'>('active');
   const [editSelectedMenus, setEditSelectedMenus] = useState<string[]>([]);
+  const [editSecurityCode, setEditSecurityCode] = useState('');
   const [errorOnEdit, setErrorOnEdit] = useState<string | null>(null);
+
+  // Visibilité du code individuel de chaque utilisateur dans le tableau
+  const [visibleCodes, setVisibleCodes] = useState<Record<string, boolean>>({});
+  const toggleCodeVisibility = (uid: string) => setVisibleCodes((prev) => ({ ...prev, [uid]: !prev[uid] }));
 
   // --- Code de sécurité (suppression/modification) — réservé à SECURITY_CODE_ADMIN_EMAIL ---
   const isSecurityCodeAdmin = (userProfile?.email || auth.currentUser?.email) === SECURITY_CODE_ADMIN_EMAIL;
@@ -326,6 +331,7 @@ export default function Users({ userProfile }: UsersProps) {
         ? MENU_OPTIONS.map(m => m.id)
         : ['dashboard', 'pos', 'products', 'clients', 'sales', 'invoices', 'notes']
     ));
+    setEditSecurityCode(user.securityCode || '');
     setErrorOnEdit(null);
   };
 
@@ -363,6 +369,12 @@ export default function Users({ userProfile }: UsersProps) {
 
     if (editSelectedMenus.length === 0) {
       setErrorOnEdit('Veuillez sélectionner au moins un droit d\'accès.');
+      setActionLoading(null);
+      return;
+    }
+
+    if (editSecurityCode && !/^[0-9]{4}$/.test(editSecurityCode)) {
+      setErrorOnEdit('Le code de sécurité doit contenir exactement 4 chiffres (ou être laissé vide).');
       setActionLoading(null);
       return;
     }
@@ -428,6 +440,7 @@ export default function Users({ userProfile }: UsersProps) {
           role: editRole,
           status: editStatus,
           allowedMenus: editSelectedMenus,
+          securityCode: editSecurityCode || '',
           ownerId: editRole === 'admin' ? targetUid : ownerId,
           creatorId: ownerId
         });
@@ -444,6 +457,7 @@ export default function Users({ userProfile }: UsersProps) {
           role: editRole,
           status: editStatus,
           allowedMenus: editSelectedMenus,
+          securityCode: editSecurityCode || '',
           ownerId: editRole === 'admin' ? targetUid : ownerId
         });
       }
@@ -798,6 +812,7 @@ export default function Users({ userProfile }: UsersProps) {
                 <tr className="border-b border-slate-100 bg-slate-50/50">
                   <th className="py-4 px-6 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">Utilisateur & ID</th>
                   <th className="py-4 px-6 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">Coordonnées de connexion</th>
+                  <th className="py-4 px-6 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">Code sécurité</th>
                   <th className="py-4 px-6 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">Rôle</th>
                   <th className="py-4 px-6 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">Menus visibles</th>
                   <th className="py-4 px-6 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">Statut</th>
@@ -899,6 +914,27 @@ export default function Users({ userProfile }: UsersProps) {
                             </div>
                           </div>
                         </div>
+                      </td>
+
+                      {/* Code de sécurité individuel */}
+                      <td className="py-4 px-6">
+                        {profile.securityCode ? (
+                          <div className="flex items-center gap-2 group/btn">
+                            <Shield className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                            <span className="font-mono bg-rose-50 text-rose-700 px-1.5 py-0.5 rounded-md border border-rose-100 text-xs font-black tracking-widest">
+                              {visibleCodes[profile.uid] ? profile.securityCode : '••••'}
+                            </span>
+                            <button
+                              onClick={() => toggleCodeVisibility(profile.uid)}
+                              className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md opacity-0 group-hover/btn:opacity-100 transition-all"
+                              title={visibleCodes[profile.uid] ? 'Masquer' : 'Afficher le code'}
+                            >
+                              {visibleCodes[profile.uid] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-slate-300 font-bold uppercase tracking-wider">Non défini</span>
+                        )}
                       </td>
 
                       {/* Rôle Badge */}
@@ -1228,6 +1264,29 @@ export default function Users({ userProfile }: UsersProps) {
                     className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 transition-shadow"
                   />
                 </div>
+              </div>
+
+              {/* Code de sécurité individuel (modification/suppression) */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-rose-500 uppercase tracking-widest block font-bold flex items-center gap-1.5">
+                  <Shield className="w-3.5 h-3.5" />
+                  Code de sécurité (4 chiffres)
+                </label>
+                <div className="relative">
+                  <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-rose-400" />
+                  <input
+                    type="text"
+                    maxLength={4}
+                    inputMode="numeric"
+                    value={editSecurityCode}
+                    onChange={(e) => setEditSecurityCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))}
+                    placeholder="Ex: 1234 (laisser vide = aucun)"
+                    className="w-full pl-10 pr-4 py-2.5 bg-rose-50/30 border border-rose-100 rounded-xl text-xs font-mono font-black tracking-[0.3em] outline-none focus:ring-2 focus:ring-rose-500/10 focus:border-rose-500 transition-shadow"
+                  />
+                </div>
+                <p className="text-[9px] text-slate-400 font-medium leading-relaxed">
+                  Ce code sera demandé à cet utilisateur avant toute modification ou suppression. Laisser vide pour ne définir aucun code.
+                </p>
               </div>
 
               {/* Role */}
