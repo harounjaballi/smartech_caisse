@@ -270,6 +270,23 @@ export default function Products({ userProfile }: ProductsProps) {
           ownerId,
           userId: userProfile?.uid || ownerId
         });
+
+        // Log d'audit (optionnel — ne bloque pas l'opération)
+        try {
+          const logRef = doc(collection(db, 'audit_logs'));
+          await setDoc(logRef, {
+            action: 'UPDATE_PRODUCT',
+            userEmail: userProfile?.email || 'unknown',
+            userName: userProfile?.name || 'unknown',
+            timestamp: new Date().toISOString(),
+            productId: editingProduct.id,
+            productName: formData.name,
+            ownerId,
+            userId: userProfile?.uid || ownerId
+          });
+        } catch (logErr) {
+          console.warn('[AUDIT LOG] Failed:', logErr);
+        }
       } else {
         const docRef = await addDoc(collection(db, 'products'), {
           ...formData,
@@ -277,6 +294,23 @@ export default function Products({ userProfile }: ProductsProps) {
           ownerId,
           userId: userProfile?.uid || ownerId
         });
+
+        // Log d'audit (optionnel — ne bloque pas l'opération)
+        try {
+          const logRef = doc(collection(db, 'audit_logs'));
+          await setDoc(logRef, {
+            action: 'CREATE_PRODUCT',
+            userEmail: userProfile?.email || 'unknown',
+            userName: userProfile?.name || 'unknown',
+            timestamp: new Date().toISOString(),
+            productId: docRef.id,
+            productName: formData.name,
+            ownerId,
+            userId: userProfile?.uid || ownerId
+          });
+        } catch (logErr) {
+          console.warn('[AUDIT LOG] Failed:', logErr);
+        }
         const stockInt = parseInt(formData.stock.toString()) || 0;
         if (stockInt > 0) {
           const expenseAmount = stockInt * formData.buyPrice;
@@ -384,6 +418,24 @@ export default function Products({ userProfile }: ProductsProps) {
       }
 
       await deleteDoc(doc(db, 'products', productToDelete.id));
+
+      // Log d'audit (optionnel — ne bloque pas l'opération)
+      try {
+        const logRef = doc(collection(db, 'audit_logs'));
+        await setDoc(logRef, {
+          action: 'DELETE_PRODUCT',
+          userEmail: userProfile?.email || 'unknown',
+          userName: userProfile?.name || 'unknown',
+          timestamp: new Date().toISOString(),
+          productId: productToDelete.id,
+          productName: productToDelete.name,
+          ownerId,
+          userId: userProfile?.uid || ownerId
+        });
+      } catch (logErr) {
+        console.warn('[AUDIT LOG] Failed:', logErr);
+      }
+
       console.log(`[DEBUG] Produit supprimé: "${productToDelete.name}" (ID: ${productToDelete.id}). Quantité: ${productToDelete.stock}, Prix d'achat: ${productToDelete.buyPrice}. Toutes les dépenses correspondantes ont été supprimées.`);
       setProductToDelete(null);
     } catch (error: any) {
