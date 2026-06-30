@@ -97,6 +97,7 @@ export default function Settings({ userProfile }: SettingsProps) {
     try {
       const salesSnap = await getDocs(query(collection(db, 'sales'), where('ownerId', '==', ownerId)));
       const invoicesSnap = await getDocs(query(collection(db, 'invoices'), where('ownerId', '==', ownerId)));
+      const auditLogsSnap = await getDocs(query(collection(db, 'audit_logs'), where('ownerId', '==', ownerId)));
 
       const toJsDate = (d: any): Date | null => {
         if (!d) return null;
@@ -115,13 +116,41 @@ export default function Settings({ userProfile }: SettingsProps) {
         .filter(inv => { const dt = toJsDate(inv.date); return !!dt && dt >= start && dt <= end; })
         .sort((a, b) => toJsDate(a.date)!.getTime() - toJsDate(b.date)!.getTime());
 
-      if (salesInRange.length === 0 && invoicesInRange.length === 0) {
+      const auditLogsInRange = auditLogsSnap.docs
+        .map(d => ({ id: d.id, ...d.data() } as any))
+        .filter(l => { const dt = toJsDate(l.timestamp); return !!dt && dt >= start && dt <= end; })
+        .sort((a, b) => toJsDate(a.timestamp)!.getTime() - toJsDate(b.timestamp)!.getTime());
+
+      if (salesInRange.length === 0 && invoicesInRange.length === 0 && auditLogsInRange.length === 0) {
         setActivityError('Aucune activité trouvée pour la période sélectionnée.');
         setIsGeneratingActivity(false);
         return;
       }
 
       const fmtDateTime = (dt: Date) => `${dt.toLocaleDateString('fr-FR')} ${dt.toLocaleTimeString('fr-FR')}`;
+
+      const actionLabels: Record<string, string> = {
+        CREATE_PRODUCT: 'Création de produit',
+        UPDATE_PRODUCT: 'Modification de produit',
+        DELETE_PRODUCT: 'Suppression de produit',
+        DELETE_SALE: 'Suppression de vente'
+      };
+
+      const journalOperations = auditLogsInRange.map(l => {
+        const dt = toJsDate(l.timestamp);
+        let details = '';
+        if (l.action === 'DELETE_SALE') {
+          details = `Ticket ${l.ticketId || ''} — Facture ${l.invoiceNumber || 'N/A'} — Total ${l.total || 0} DT`;
+        } else if (l.productName) {
+          details = `Produit : ${l.productName}`;
+        }
+        return {
+          'Date & Heure': dt ? fmtDateTime(dt) : '',
+          'Opération': actionLabels[l.action] || l.action || 'N/A',
+          'Utilisateur': l.userName && l.userName !== 'unknown' ? l.userName : (l.userEmail || 'N/A'),
+          'Détails': details
+        };
+      });
 
       const journalVentes = salesInRange.map(s => {
         const dt = toJsDate(s.date);
@@ -165,6 +194,7 @@ export default function Settings({ userProfile }: SettingsProps) {
         { 'Indicateur': 'Période', 'Valeur': `Du ${start.toLocaleDateString('fr-FR')} au ${end.toLocaleDateString('fr-FR')}` },
         { 'Indicateur': 'Nombre de ventes', 'Valeur': salesInRange.length },
         { 'Indicateur': 'Nombre de factures', 'Valeur': invoicesInRange.length },
+        { 'Indicateur': 'Nombre d\'opérations (produits, suppressions...)', 'Valeur': auditLogsInRange.length },
         { 'Indicateur': "Chiffre d'affaires total (DT)", 'Valeur': totalCA.toFixed(2) },
         { 'Indicateur': 'Total encaissé (DT)', 'Valeur': totalPaye.toFixed(2) },
         { 'Indicateur': 'Total dettes générées (DT)', 'Valeur': totalDette.toFixed(2) },
@@ -176,10 +206,12 @@ export default function Settings({ userProfile }: SettingsProps) {
       const resumeSheet = XLSX.utils.json_to_sheet(resume);
       const ventesSheet = XLSX.utils.json_to_sheet(journalVentes);
       const facturesSheet = XLSX.utils.json_to_sheet(journalFactures);
+      const operationsSheet = XLSX.utils.json_to_sheet(journalOperations);
 
       XLSX.utils.book_append_sheet(wb, resumeSheet, 'Résumé');
       XLSX.utils.book_append_sheet(wb, ventesSheet, 'Ventes');
       XLSX.utils.book_append_sheet(wb, facturesSheet, 'Factures');
+      XLSX.utils.book_append_sheet(wb, operationsSheet, 'Opérations');
 
       const fileName = `Journal_Activite_${activityStartDate}_au_${activityEndDate}.xlsx`;
       XLSX.writeFile(wb, fileName);
@@ -187,7 +219,7 @@ export default function Settings({ userProfile }: SettingsProps) {
       setSuccess('Journal d\'activité téléchargé avec succès !');
       setTimeout(() => setSuccess(null), 3000);
     } catch (error) {
-      handleFirestoreError(error, OperationType.LIST, `sales|invoices/${ownerId}`);
+      handleFirestoreError(error, OperationType.LIST, `sales|invoices|audit_logs/${ownerId}`);
     } finally {
       setIsGeneratingActivity(false);
     }
@@ -838,7 +870,7 @@ export default function Settings({ userProfile }: SettingsProps) {
               <div className="space-y-1">
                 <h3 className="text-xs font-black uppercase tracking-wider text-slate-700">3. Journal d'activité</h3>
                 <p className="text-[11px] text-slate-400 font-medium leading-relaxed">
-                  Téléchargez un fichier détaillé de l'historique d'activité (ventes et factures) sur une période donnée. La période sélectionnée ne peut pas dépasser 1 mois.
+                  Téléchargez un fichier détaillé de l'historique d'activité (ventes, factures, créations/modifications/suppressions de produits) sur une période donnée. La période sélectionnée ne peut pas dépasser 1 mois.
                 </p>
               </div>
 
