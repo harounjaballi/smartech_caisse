@@ -69,12 +69,12 @@ export default function Settings({ userProfile }: SettingsProps) {
 
   const todayStr = new Date().toISOString().split('T')[0];
 
-  const handleDownloadActivityLog = async () => {
+  const validateActivityRange = (): { start: Date; end: Date } | null => {
     setActivityError('');
 
     if (!activityStartDate || !activityEndDate) {
       setActivityError('Veuillez sélectionner une date de début et une date de fin.');
-      return;
+      return null;
     }
 
     const start = new Date(activityStartDate);
@@ -84,42 +84,63 @@ export default function Settings({ userProfile }: SettingsProps) {
 
     if (end < start) {
       setActivityError('La date de fin doit être postérieure ou égale à la date de début.');
-      return;
+      return null;
     }
 
     const diffDays = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
     if (diffDays > 31) {
       setActivityError('La période sélectionnée ne peut pas dépasser 1 mois (31 jours maximum).');
-      return;
+      return null;
     }
+
+    return { start, end };
+  };
+
+  const toJsDate = (d: any): Date | null => {
+    if (!d) return null;
+    if (typeof d.toDate === 'function') return d.toDate();
+    const parsed = new Date(d);
+    return isNaN(parsed.getTime()) ? null : parsed;
+  };
+
+  const fetchActivityRecords = async (start: Date, end: Date) => {
+    const salesSnap = await getDocs(query(collection(db, 'sales'), where('ownerId', '==', ownerId)));
+    const invoicesSnap = await getDocs(query(collection(db, 'invoices'), where('ownerId', '==', ownerId)));
+    const auditLogsSnap = await getDocs(query(collection(db, 'audit_logs'), where('ownerId', '==', ownerId)));
+
+    const salesInRange = salesSnap.docs
+      .map(d => ({ id: d.id, ...d.data() } as any))
+      .filter(s => { const dt = toJsDate(s.date); return !!dt && dt >= start && dt <= end; })
+      .sort((a, b) => toJsDate(a.date)!.getTime() - toJsDate(b.date)!.getTime());
+
+    const invoicesInRange = invoicesSnap.docs
+      .map(d => ({ id: d.id, ...d.data() } as any))
+      .filter(inv => { const dt = toJsDate(inv.date); return !!dt && dt >= start && dt <= end; })
+      .sort((a, b) => toJsDate(a.date)!.getTime() - toJsDate(b.date)!.getTime());
+
+    const auditLogsInRange = auditLogsSnap.docs
+      .map(d => ({ id: d.id, ...d.data() } as any))
+      .filter(l => { const dt = toJsDate(l.timestamp); return !!dt && dt >= start && dt <= end; })
+      .sort((a, b) => toJsDate(a.timestamp)!.getTime() - toJsDate(b.timestamp)!.getTime());
+
+    return { salesInRange, invoicesInRange, auditLogsInRange };
+  };
+
+  const actionLabels: Record<string, string> = {
+    CREATE_PRODUCT: 'Création de produit',
+    UPDATE_PRODUCT: 'Modification de produit',
+    DELETE_PRODUCT: 'Suppression de produit',
+    DELETE_SALE: 'Suppression de vente'
+  };
+
+  const handleDownloadActivityLog = async () => {
+    const range = validateActivityRange();
+    if (!range) return;
+    const { start, end } = range;
 
     setIsGeneratingActivity(true);
     try {
-      const salesSnap = await getDocs(query(collection(db, 'sales'), where('ownerId', '==', ownerId)));
-      const invoicesSnap = await getDocs(query(collection(db, 'invoices'), where('ownerId', '==', ownerId)));
-      const auditLogsSnap = await getDocs(query(collection(db, 'audit_logs'), where('ownerId', '==', ownerId)));
-
-      const toJsDate = (d: any): Date | null => {
-        if (!d) return null;
-        if (typeof d.toDate === 'function') return d.toDate();
-        const parsed = new Date(d);
-        return isNaN(parsed.getTime()) ? null : parsed;
-      };
-
-      const salesInRange = salesSnap.docs
-        .map(d => ({ id: d.id, ...d.data() } as any))
-        .filter(s => { const dt = toJsDate(s.date); return !!dt && dt >= start && dt <= end; })
-        .sort((a, b) => toJsDate(a.date)!.getTime() - toJsDate(b.date)!.getTime());
-
-      const invoicesInRange = invoicesSnap.docs
-        .map(d => ({ id: d.id, ...d.data() } as any))
-        .filter(inv => { const dt = toJsDate(inv.date); return !!dt && dt >= start && dt <= end; })
-        .sort((a, b) => toJsDate(a.date)!.getTime() - toJsDate(b.date)!.getTime());
-
-      const auditLogsInRange = auditLogsSnap.docs
-        .map(d => ({ id: d.id, ...d.data() } as any))
-        .filter(l => { const dt = toJsDate(l.timestamp); return !!dt && dt >= start && dt <= end; })
-        .sort((a, b) => toJsDate(a.timestamp)!.getTime() - toJsDate(b.timestamp)!.getTime());
+      const { salesInRange, invoicesInRange, auditLogsInRange } = await fetchActivityRecords(start, end);
 
       if (salesInRange.length === 0 && invoicesInRange.length === 0 && auditLogsInRange.length === 0) {
         setActivityError('Aucune activité trouvée pour la période sélectionnée.');
@@ -128,13 +149,6 @@ export default function Settings({ userProfile }: SettingsProps) {
       }
 
       const fmtDateTime = (dt: Date) => `${dt.toLocaleDateString('fr-FR')} ${dt.toLocaleTimeString('fr-FR')}`;
-
-      const actionLabels: Record<string, string> = {
-        CREATE_PRODUCT: 'Création de produit',
-        UPDATE_PRODUCT: 'Modification de produit',
-        DELETE_PRODUCT: 'Suppression de produit',
-        DELETE_SALE: 'Suppression de vente'
-      };
 
       const journalOperations = auditLogsInRange.map(l => {
         const dt = toJsDate(l.timestamp);
@@ -222,6 +236,69 @@ export default function Settings({ userProfile }: SettingsProps) {
       handleFirestoreError(error, OperationType.LIST, `sales|invoices|audit_logs/${ownerId}`);
     } finally {
       setIsGeneratingActivity(false);
+    }
+  };
+
+  // Affichage du journal directement dans l'application (style fichier log), sans téléchargement
+  const [showActivityLogModal, setShowActivityLogModal] = useState(false);
+  const [activityLogLines, setActivityLogLines] = useState<string[]>([]);
+  const [isLoadingActivityView, setIsLoadingActivityView] = useState(false);
+
+  const handleViewActivityLog = async () => {
+    const range = validateActivityRange();
+    if (!range) return;
+    const { start, end } = range;
+
+    setIsLoadingActivityView(true);
+    try {
+      const { salesInRange, invoicesInRange, auditLogsInRange } = await fetchActivityRecords(start, end);
+
+      if (salesInRange.length === 0 && invoicesInRange.length === 0 && auditLogsInRange.length === 0) {
+        setActivityError('Aucune activité trouvée pour la période sélectionnée.');
+        setIsLoadingActivityView(false);
+        return;
+      }
+
+      const fmtDateTime = (dt: Date) => `${dt.toLocaleDateString('fr-FR')} ${dt.toLocaleTimeString('fr-FR')}`;
+
+      type LogLine = { dt: Date; text: string };
+      const lines: LogLine[] = [];
+
+      salesInRange.forEach(s => {
+        const dt = toJsDate(s.date);
+        if (!dt) return;
+        const client = s.clientName || 'Client de passage';
+        lines.push({ dt, text: `[${fmtDateTime(dt)}] VENTE      | Réf ${s.id} | Client: ${client} | Total: ${(s.total || 0).toFixed(2)} DT | Payé: ${(s.paid || 0).toFixed(2)} DT | Dette: ${(s.debt || 0).toFixed(2)} DT` });
+      });
+
+      invoicesInRange.forEach(inv => {
+        const dt = toJsDate(inv.date);
+        if (!dt) return;
+        lines.push({ dt, text: `[${fmtDateTime(dt)}] FACTURE    | N° ${inv.number || inv.id} | Client: ${inv.clientName || 'N/A'} | Total: ${(inv.total || 0).toFixed(2)} DT` });
+      });
+
+      auditLogsInRange.forEach(l => {
+        const dt = toJsDate(l.timestamp);
+        if (!dt) return;
+        const label = (actionLabels[l.action] || l.action || 'OPÉRATION').toUpperCase();
+        const user = l.userName && l.userName !== 'unknown' ? l.userName : (l.userEmail || 'N/A');
+        let details = '';
+        if (l.action === 'DELETE_SALE') {
+          details = `Ticket ${l.ticketId || ''} | Facture ${l.invoiceNumber || 'N/A'} | Total: ${(l.total || 0).toFixed(2)} DT`;
+        } else if (l.productName) {
+          details = `Produit: ${l.productName}`;
+        }
+        lines.push({ dt, text: `[${fmtDateTime(dt)}] ${label.padEnd(10, ' ')} | Par: ${user} | ${details}` });
+      });
+
+      lines.sort((a, b) => a.dt.getTime() - b.dt.getTime());
+
+      setActivityLogLines(lines.map(l => l.text));
+      setShowActivityLogModal(true);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, `sales|invoices|audit_logs/${ownerId}`);
+    } finally {
+      setIsLoadingActivityView(false);
     }
   };
 
@@ -910,19 +987,74 @@ export default function Settings({ userProfile }: SettingsProps) {
                 </div>
               )}
 
-              <button
-                type="button"
-                onClick={handleDownloadActivityLog}
-                disabled={isGeneratingActivity || !activityStartDate || !activityEndDate}
-                className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all shadow-md shadow-indigo-600/10 active:scale-[0.99]"
-              >
-                <FileText className="w-4 h-4" />
-                {isGeneratingActivity ? 'Génération du journal...' : "Télécharger le journal d'activité (.xlsx)"}
-              </button>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={handleViewActivityLog}
+                  disabled={isLoadingActivityView || !activityStartDate || !activityEndDate}
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 bg-slate-800 hover:bg-slate-900 disabled:opacity-40 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all shadow-md shadow-slate-800/10 active:scale-[0.99]"
+                >
+                  <Eye className="w-4 h-4" />
+                  {isLoadingActivityView ? 'Chargement...' : 'Afficher dans l\'app'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadActivityLog}
+                  disabled={isGeneratingActivity || !activityStartDate || !activityEndDate}
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all shadow-md shadow-indigo-600/10 active:scale-[0.99]"
+                >
+                  <FileText className="w-4 h-4" />
+                  {isGeneratingActivity ? 'Génération...' : 'Télécharger (.xlsx)'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
+      )}
+
+      {/* Modal Journal d'activité (affichage en ligne, style fichier log) */}
+      {showActivityLogModal && (
+        <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-slate-800 text-white rounded-xl">
+                  <FileText className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 text-sm">Journal d'activité</h3>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                    Du {activityStartDate} au {activityEndDate} — {activityLogLines.length} entrée{activityLogLines.length > 1 ? 's' : ''}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowActivityLogModal(false)}
+                className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto bg-slate-950 p-4">
+              <pre className="text-[11px] leading-relaxed text-emerald-400 font-mono whitespace-pre-wrap break-words">
+                {activityLogLines.join('\n')}
+              </pre>
+            </div>
+
+            <div className="px-5 py-3.5 border-t border-slate-100 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowActivityLogModal(false)}
+                className="px-4 py-2 bg-slate-100 text-slate-700 text-xs font-bold rounded-xl hover:bg-slate-200 transition-colors uppercase tracking-wider"
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Success Toast */}
