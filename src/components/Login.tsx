@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 import { collection, query, where, getDocs, setDoc, doc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { ShoppingCart, Mail, Lock, AlertCircle, Chrome } from 'lucide-react';
@@ -78,20 +78,21 @@ export default function Login() {
           }
         }
       } else {
-        // D'abord vérifier dans Firestore si le compte est banni
+        // Connexion Firebase Auth d'abord (les règles Firestore exigent un utilisateur authentifié pour lire)
+        await signInWithEmailAndPassword(auth, email, password);
+
+        // Ensuite, vérifier dans Firestore si le compte est banni
         const usersRef = collection(db, 'users');
         const qCheck = query(usersRef, where('email', '==', email));
         const snapCheck = await getDocs(qCheck);
-        
+
         if (!snapCheck.empty) {
           const profileData = snapCheck.docs[0].data();
           if (profileData.status === 'banned') {
+            await signOut(auth);
             throw new Error("Votre compte a été banni. Veuillez contacter l'administrateur.");
           }
         }
-
-        // Connexion Firebase Auth
-        await signInWithEmailAndPassword(auth, email, password);
       }
     } catch (err: any) {
       if (err.code === 'auth/operation-not-allowed') {
