@@ -633,7 +633,7 @@ export default function Settings({ userProfile }: SettingsProps) {
                         </button>
                         <button type="button"
                           disabled={otpInput.length !== 6}
-                          onClick={() => {
+                          onClick={async () => {
                             try {
                               const uid = userProfile?.uid || auth.currentUser?.uid || '';
                               const res = await fetch('/api/otp/verify', {
