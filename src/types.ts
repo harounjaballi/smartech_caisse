@@ -79,6 +79,7 @@ export interface UserProfile {
   status?: 'active' | 'banned';
   allowedMenus?: string[];
   password?: string;
+  securityCode?: string;
   ownerId?: string;
   creatorId?: string;
 }
