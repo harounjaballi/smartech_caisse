@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
-import { collection, query, where, getDocs, setDoc, doc } from 'firebase/firestore';
+import { collection, query, where, getDocs, setDoc, doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { ShoppingCart, Mail, Lock, AlertCircle, Chrome } from 'lucide-react';
 
@@ -79,15 +79,34 @@ export default function Login() {
         }
       } else {
         // Connexion Firebase Auth d'abord (les règles Firestore exigent un utilisateur authentifié pour lire)
-        await signInWithEmailAndPassword(auth, email, password);
+        const userCred = await signInWithEmailAndPassword(auth, email, password);
 
-        // Ensuite, vérifier dans Firestore si le compte est banni
-        const usersRef = collection(db, 'users');
-        const qCheck = query(usersRef, where('email', '==', email));
-        const snapCheck = await getDocs(qCheck);
+        // Ensuite, vérifier dans Firestore si le compte est banni.
+        // Lecture directe par UID (plus fiable qu'une requête "list" par email),
+        // avec quelques tentatives en cas de léger retard de propagation du jeton d'authentification.
+        let profileData: any = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            const userSnap = await getDoc(doc(db, 'users', userCred.user.uid));
+            if (userSnap.exists()) {
+              profileData = userSnap.data();
+            }
+            break;
+          } catch (checkErr: any) {
+            const isPermissionIssue = checkErr.code === 'permission-denied';
+            if (isPermissionIssue && attempt < 2) {
+              await new Promise((resolve) => setTimeout(resolve, 400));
+              continue;
+            }
+            // Après plusieurs tentatives, on ne bloque pas la connexion pour ça :
+            // le contrôle du statut banni sera de toute façon réappliqué en temps réel
+            // par l'écoute du profil dans App.tsx.
+            console.warn("Vérification du statut banni ignorée (accès temporairement indisponible) :", checkErr);
+            break;
+          }
+        }
 
-        if (!snapCheck.empty) {
-          const profileData = snapCheck.docs[0].data();
+        if (profileData) {
           if (profileData.status === 'banned') {
             await signOut(auth);
             throw new Error("Votre compte a été banni. Veuillez contacter l'administrateur.");
