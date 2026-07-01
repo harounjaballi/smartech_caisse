@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, doc, setDoc, updateDoc, deleteDoc, where, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, query, doc, setDoc, updateDoc, deleteDoc, where, getDocs, getDoc, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 import { initializeApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateEmail, updatePassword, deleteUser } from 'firebase/auth';
@@ -290,6 +290,56 @@ export default function Users({ userProfile }: UsersProps) {
     }
   };
 
+  // Collections contenant un champ ownerId à réaligner lors d'une migration de compte admin
+  const OWNER_ID_COLLECTIONS = ['products', 'sales', 'invoices', 'clients', 'categories', 'supplies', 'notes'];
+
+  const cascadeOwnerIdMigration = async (oldOwnerId: string, newOwnerId: string) => {
+    console.log(`[Migration ownerId] ${oldOwnerId} -> ${newOwnerId}`);
+
+    for (const collectionName of OWNER_ID_COLLECTIONS) {
+      try {
+        const q = query(collection(db, collectionName), where('ownerId', '==', oldOwnerId));
+        const snap = await getDocs(q);
+        if (snap.empty) continue;
+
+        // Firestore limite un batch à 500 opérations, on découpe par sécurité
+        for (let i = 0; i < snap.docs.length; i += 450) {
+          const chunk = snap.docs.slice(i, i + 450);
+          const batch = writeBatch(db);
+          chunk.forEach((d) => batch.update(d.ref, { ownerId: newOwnerId }));
+          await batch.commit();
+        }
+        console.log(`[Migration ownerId] ${collectionName}: ${snap.size} document(s) réalignés.`);
+      } catch (err) {
+        console.error(`[Migration ownerId] Échec sur la collection ${collectionName}:`, err);
+      }
+    }
+
+    // Le document settings/{ownerId} et counters/invoices_{ownerId} utilisent l'ownerId comme identifiant de document
+    try {
+      const oldSettingsSnap = await getDoc(doc(db, 'settings', oldOwnerId));
+      if (oldSettingsSnap.exists()) {
+        await setDoc(doc(db, 'settings', newOwnerId), oldSettingsSnap.data());
+        await deleteDoc(doc(db, 'settings', oldOwnerId));
+        console.log('[Migration ownerId] settings migré.');
+      }
+    } catch (err) {
+      console.error('[Migration ownerId] Échec migration settings:', err);
+    }
+
+    try {
+      const oldCounterId = `invoices_${oldOwnerId}`;
+      const oldCounterSnap = await getDoc(doc(db, 'counters', oldCounterId));
+      if (oldCounterSnap.exists()) {
+        await setDoc(doc(db, 'counters', `invoices_${newOwnerId}`), oldCounterSnap.data());
+        await deleteDoc(doc(db, 'counters', oldCounterId));
+        console.log('[Migration ownerId] counters migré.');
+      }
+    } catch (err) {
+      console.error('[Migration ownerId] Échec migration counters:', err);
+    }
+  };
+
   const handleOpenEdit = (user: UserProfile) => {
     setEditingUser(user);
     setEditName(user.name || '');
@@ -418,6 +468,14 @@ export default function Users({ userProfile }: UsersProps) {
 
         console.log(`Migration Firestore : suppression de l'ancien profil users/${editingUser.uid}`);
         await deleteDoc(doc(db, "users", editingUser.uid));
+
+        // Si le compte migré est un admin (propriétaire de magasin), son ownerId change :
+        // on réaligne automatiquement toutes ses données (produits, ventes, factures, etc.)
+        // pour éviter des données orphelines invisibles dans l'application.
+        if (editRole === 'admin' && editingUser.uid !== targetUid) {
+          console.log(`Réalignement des données du magasin : ${editingUser.uid} -> ${targetUid}`);
+          await cascadeOwnerIdMigration(editingUser.uid, targetUid);
+        }
       } else {
         console.log(`Mise à jour standard Firestore pour users/${targetUid}`);
         const userRef = doc(db, "users", targetUid);
@@ -434,9 +492,13 @@ export default function Users({ userProfile }: UsersProps) {
       }
 
       console.log("Sauvegarde Firestore de la mise à jour réussie!");
-      setSuccess(`Utilisateur ${cleanEmail} mis à jour avec succès.`);
+      setSuccess(
+        isMigration && editRole === 'admin'
+          ? `Utilisateur ${cleanEmail} mis à jour et données du magasin réalignées automatiquement.`
+          : `Utilisateur ${cleanEmail} mis à jour avec succès.`
+      );
       setEditingUser(null);
-      setTimeout(() => setSuccess(null), 4000);
+      setTimeout(() => setSuccess(null), 6000);
     } catch (err: any) {
       console.error("Erreur critique d'écriture lors de la modification de l'utilisateur:", err);
       setErrorOnEdit(err.message || 'Une erreur est survenue lors de la modification.');
