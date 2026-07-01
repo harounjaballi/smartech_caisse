@@ -22,7 +22,8 @@ import {
   Calendar,
   CheckCircle,
   Wifi,
-  WifiOff
+  WifiOff,
+  BarChart3
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { UserProfile, Note } from './types';
@@ -39,6 +40,7 @@ import Settings from './components/Settings';
 import Login from './components/Login';
 import UsersManager from './components/Users';
 import Notes from './components/Notes';
+import Statistics from './components/Statistics';
 
 // Error Handling
 export enum OperationType {
@@ -149,6 +151,9 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   }
 }
 
+// Seul ce compte a accès à la rubrique Statistique (vue globale multi-magasins)
+export const SUPER_ADMIN_EMAIL = 'harounjaballi@gmail.com';
+
 export function hasMenuAccess(userProfile: UserProfile | null, menuId: string): boolean {
   if (!userProfile) return false;
   
@@ -209,9 +214,11 @@ function Sidebar({
     { id: 'notes', name: 'Mémos & Notes', path: '/notes', icon: StickyNote },
     { id: 'settings', name: 'Paramètres', path: '/settings', icon: SettingsIcon },
     { id: 'users', name: 'Utilisateurs', path: '/users', icon: UserCheck, adminOnly: true },
+    { id: 'statistics', name: 'Statistique', path: '/statistics', icon: BarChart3, superAdminOnly: true },
   ];
 
   const navItems = allNavItems.filter((item) => {
+    if (item.superAdminOnly) return userProfile?.email === SUPER_ADMIN_EMAIL;
     if (item.adminOnly && userProfile?.role !== 'admin') return false;
     return hasMenuAccess(userProfile, item.id);
   });
@@ -565,7 +572,8 @@ export default function App() {
             role: 'admin',
             status: 'active',
             allowedMenus: defaultAllowed,
-            ownerId: firebaseUser.uid
+            ownerId: firebaseUser.uid,
+            createdAt: new Date().toISOString()
           };
           await setDoc(userRef, profileData);
         } else {
@@ -766,6 +774,7 @@ export default function App() {
                 <Route path="/invoices" element={hasMenuAccess(userProfile, 'invoices') ? <Invoices userProfile={userProfile} /> : <Navigate to="/" replace />} />
                 <Route path="/notes" element={hasMenuAccess(userProfile, 'notes') ? <Notes userProfile={userProfile} /> : <Navigate to="/" replace />} />
                 <Route path="/users" element={userProfile?.role === 'admin' && hasMenuAccess(userProfile, 'users') ? <UsersManager userProfile={userProfile} /> : <Navigate to="/" replace />} />
+                <Route path="/statistics" element={userProfile?.email === SUPER_ADMIN_EMAIL ? <Statistics userProfile={userProfile} /> : <Navigate to="/" replace />} />
                 <Route path="/settings" element={hasMenuAccess(userProfile, 'settings') ? <Settings userProfile={userProfile} /> : <Navigate to="/" replace />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
