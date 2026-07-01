@@ -260,7 +260,8 @@ export default function Users({ userProfile }: UsersProps) {
         status: 'active',
         allowedMenus: selectedMenus,
         ownerId: roleInput === 'admin' ? targetUid : ownerId,
-        creatorId: ownerId
+        creatorId: ownerId,
+        createdAt: new Date().toISOString()
       });
       console.log("Création et sauvegarde Firestore terminées!");
 
@@ -463,7 +464,8 @@ export default function Users({ userProfile }: UsersProps) {
           allowedMenus: editSelectedMenus,
           securityCode: editSecurityCode || '',
           ownerId: editRole === 'admin' ? targetUid : ownerId,
-          creatorId: ownerId
+          creatorId: ownerId,
+          createdAt: editingUser.createdAt || new Date().toISOString()
         });
 
         console.log(`Migration Firestore : suppression de l'ancien profil users/${editingUser.uid}`);
