@@ -628,6 +628,8 @@ export default function Products({ userProfile }: ProductsProps) {
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-slate-400" />
               <input
                 type="text"
+                name="product-search"
+                autoComplete="off"
                 placeholder="Rechercher un produit..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -1146,6 +1148,8 @@ export default function Products({ userProfile }: ProductsProps) {
                 <Shield className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-rose-400" />
                 <input
                   type={showSecurityInput ? 'text' : 'password'}
+                  name="product-security-code"
+                  autoComplete="one-time-code"
                   maxLength={4}
                   inputMode="numeric"
                   autoFocus
