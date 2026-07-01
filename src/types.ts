@@ -82,6 +82,7 @@ export interface UserProfile {
   securityCode?: string;
   ownerId?: string;
   creatorId?: string;
+  createdAt?: string;
 }
 
 export interface StoreSettings {
