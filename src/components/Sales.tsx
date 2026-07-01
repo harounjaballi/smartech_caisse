@@ -338,6 +338,7 @@ export default function Sales({ userProfile }: SalesProps) {
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
               type="text"
+              name="sales-search"
               placeholder="Client ou ID…"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -630,6 +631,8 @@ export default function Sales({ userProfile }: SalesProps) {
                 <Shield className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-rose-400" />
                 <input
                   type={showSecurityInput ? 'text' : 'password'}
+                  name="sale-security-code"
+                  autoComplete="one-time-code"
                   maxLength={4}
                   inputMode="numeric"
                   autoFocus
