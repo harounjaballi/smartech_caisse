@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { collection, onSnapshot, query, orderBy, limit, doc, getDoc, where, deleteDoc, setDoc, updateDoc, runTransaction, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Sale, Invoice, UserProfile, StoreSettings } from '../types';
+import { Sale, Invoice, UserProfile } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
 import { Search, Calendar, User, ShoppingBag, Eye, X, Printer, Download, TrendingUp, Receipt, AlertCircle, CheckCircle2, Clock, Trash2, Shield, EyeOff } from 'lucide-react';
 import { format } from 'date-fns';
@@ -22,7 +22,6 @@ export default function Sales({ userProfile }: SalesProps) {
 
   // Deletion states
   const [saleToDelete, setSaleToDelete] = useState<Sale | null>(null);
-  const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
   const [showSecurityModal, setShowSecurityModal] = useState(false);
   const [securityCode, setSecurityCode] = useState('');
   const [securityError, setSecurityError] = useState(false);
@@ -454,23 +453,16 @@ export default function Sales({ userProfile }: SalesProps) {
                         </button>
 
                         <button
-                          onClick={async (e) => {
+                          onClick={(e) => {
                             e.stopPropagation();
-                            // Charger le deleteCode depuis Firestore
-                            try {
-                              const settingsSnap = await getDoc(doc(db, 'settings', ownerId));
-                              const code = settingsSnap.exists() ? settingsSnap.data().deleteCode : '';
-                              if (code && code.length === 4) {
-                                setStoreSettings(settingsSnap.data() as any);
-                                setPendingDeleteSale(sale);
-                                setSecurityCode('');
-                                setSecurityError(false);
-                                setShowSecurityInput(false);
-                                setShowSecurityModal(true);
-                              } else {
-                                setSaleToDelete(sale);
-                              }
-                            } catch {
+                            const code = userProfile?.securityCode;
+                            if (code && code.length === 4) {
+                              setPendingDeleteSale(sale);
+                              setSecurityCode('');
+                              setSecurityError(false);
+                              setShowSecurityInput(false);
+                              setShowSecurityModal(true);
+                            } else {
                               setSaleToDelete(sale);
                             }
                           }}
@@ -649,7 +641,7 @@ export default function Sales({ userProfile }: SalesProps) {
                   }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && securityCode.length === 4) {
-                      if (securityCode === storeSettings?.deleteCode) {
+                      if (securityCode === userProfile?.securityCode) {
                         setShowSecurityModal(false);
                         setSaleToDelete(pendingDeleteSale);
                         setPendingDeleteSale(null);
@@ -689,7 +681,7 @@ export default function Sales({ userProfile }: SalesProps) {
                 </button>
                 <button
                   onClick={() => {
-                    if (securityCode === storeSettings?.deleteCode) {
+                    if (securityCode === userProfile?.securityCode) {
                       setShowSecurityModal(false);
                       setSaleToDelete(pendingDeleteSale);
                       setPendingDeleteSale(null);
