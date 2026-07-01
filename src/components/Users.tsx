@@ -85,20 +85,32 @@ export default function Users({ userProfile }: UsersProps) {
 
     setLoading(true);
 
-    // Utiliser getDocs pour une lecture immédiate de TOUS les users
+    // Un magasin ne doit voir que ses propres comptes (lui-même + ses collaborateurs).
+    // Seul le super-admin de la plateforme (harounjaballi@gmail.com) voit tous les magasins,
+    // ce qui est nécessaire pour l'administration multi-magasins et les migrations.
+    const isSuperAdmin = userProfile.email === 'harounjaballi@gmail.com';
+    const myOwnerId = userProfile.ownerId || userProfile.uid;
+
+    const filterToOwnStore = (allDocs: UserProfile[]) => {
+      if (isSuperAdmin) {
+        return allDocs.filter(u => u.uid !== userProfile.uid);
+      }
+      return allDocs.filter(u => u.uid !== userProfile.uid && (u.ownerId || u.uid) === myOwnerId);
+    };
+
+    // Utiliser getDocs pour une lecture immédiate de TOUS les users (super-admin)
+    // ou uniquement des comptes de son propre magasin (admin standard)
     // puis onSnapshot pour les mises à jour en temps réel
-    const qAll = query(collection(db, 'users'));
+    const qAll = isSuperAdmin
+      ? query(collection(db, 'users'))
+      : query(collection(db, 'users'), where('ownerId', '==', myOwnerId));
 
     // Lecture initiale immédiate
     getDocs(qAll).then((snapshot) => {
       console.log("[Users DEBUG] getDocs total docs:", snapshot.size);
-      snapshot.docs.forEach(d => {
-        const data = d.data();
-        console.log("[Users DEBUG] doc:", d.id, "| email:", data.email, "| ownerId:", data.ownerId, "| creatorId:", data.creatorId);
-      });
 
       const allDocs = snapshot.docs.map(d => ({ ...d.data(), uid: d.id } as UserProfile));
-      const subUsers = allDocs.filter(u => u.uid !== userProfile.uid);
+      const subUsers = filterToOwnStore(allDocs);
       setUsers([userProfile, ...subUsers]);
       setLoading(false);
     }).catch(err => {
@@ -110,7 +122,7 @@ export default function Users({ userProfile }: UsersProps) {
     const unsub = onSnapshot(qAll, (snapshot) => {
       console.log("[Users DEBUG] onSnapshot docs:", snapshot.size);
       const allDocs = snapshot.docs.map(d => ({ ...d.data(), uid: d.id } as UserProfile));
-      const subUsers = allDocs.filter(u => u.uid !== userProfile.uid);
+      const subUsers = filterToOwnStore(allDocs);
       setUsers([userProfile, ...subUsers]);
     }, (err) => {
       console.error("[Users DEBUG] onSnapshot error:", err.code, err.message);
