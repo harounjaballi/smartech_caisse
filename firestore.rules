@@ -16,6 +16,7 @@ service cloud.firestore {
 
     function hasAccess(ownerId) {
       return isAuthenticated() && (
+        isAdmin() ||
         request.auth.uid == ownerId ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == ownerId)
@@ -82,6 +83,7 @@ service cloud.firestore {
 
     match /counters/{counterId} {
       allow read, write: if isAuthenticated() && (
+        isAdmin() ||
         counterId == 'invoices_' + request.auth.uid ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
          counterId == 'invoices_' + get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', ''))
@@ -97,6 +99,7 @@ service cloud.firestore {
 
     match /settings/{settingId} {
       allow read, write: if isAuthenticated() && (
+        isAdmin() ||
         settingId == request.auth.uid ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == settingId)
