@@ -506,9 +506,10 @@ export default function Products({ userProfile }: ProductsProps) {
   };
 
   // Demande le code de sécurité avant d'autoriser une modification ou une suppression.
-  // Si aucun code n'est configuré dans les paramètres, l'action est exécutée directement.
+  // Chaque utilisateur a son propre code (défini par l'admin dans Gestion des Utilisateurs).
+  // Si aucun code n'est configuré pour cet utilisateur, l'action est exécutée directement.
   const requestSecureAction = (action: 'edit' | 'delete', product: Product) => {
-    const code = storeSettings?.deleteCode;
+    const code = userProfile?.securityCode;
     if (code && code.length === 4) {
       setPendingAction(action);
       setPendingProduct(product);
@@ -527,7 +528,7 @@ export default function Products({ userProfile }: ProductsProps) {
 
   const confirmSecureAction = () => {
     if (!pendingProduct || !pendingAction) return;
-    if (securityCode === storeSettings?.deleteCode) {
+    if (securityCode === userProfile?.securityCode) {
       const action = pendingAction;
       const product = pendingProduct;
       setShowSecurityModal(false);
