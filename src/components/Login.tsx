@@ -63,7 +63,8 @@ export default function Login() {
               role: 'admin',
               status: 'active',
               allowedMenus: defaultAllowed,
-              ownerId: newUid
+              ownerId: newUid,
+              createdAt: new Date().toISOString()
             };
             
             await setDoc(doc(db, 'users', newUid), profileData);
