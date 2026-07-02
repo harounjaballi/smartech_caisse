@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { collection, onSnapshot, addDoc, updateDoc, doc, query, orderBy, serverTimestamp, runTransaction, getDoc, setDoc, where } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, doc, query, orderBy, serverTimestamp, runTransaction, getDoc, setDoc, getDocs, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Product, Client, SaleItem, Sale, Invoice, Category, StoreSettings, UserProfile } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
-import { Search, ShoppingCart, Trash2, Plus, Minus, User, CreditCard, CheckCircle, AlertCircle, Printer, X, FileText, Barcode, Filter, Tag, Coins, Percent, TrendingUp, UserCheck } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, Plus, Minus, User, CreditCard, CheckCircle, AlertCircle, Printer, X, FileText, Barcode, Filter, Tag, Coins, Percent, TrendingUp, UserCheck, Flame } from 'lucide-react';
 import { cn, decodeAzertyBarcode } from '../lib/utils';
 import { format } from 'date-fns';
 import { PrintableTicket } from './PrintableTicket';
@@ -220,6 +220,24 @@ export default function POS({ userProfile }: POSProps) {
     };
   }, [scannerActive, products]);
 
+  // Fréquence de vente par produit (quantités cumulées) pour trier les raccourcis
+  const [salesQtyMap, setSalesQtyMap] = useState<Record<string, number>>({});
+  useEffect(() => {
+    if (!ownerId || ownerId === 'no_user_auth') return;
+    getDocs(query(collection(db, 'sales'), where('ownerId', '==', ownerId)))
+      .then(snapshot => {
+        const map: Record<string, number> = {};
+        snapshot.docs.forEach(d => {
+          const items = (d.data().items || []) as SaleItem[];
+          items.forEach(item => {
+            if (item.productId) map[item.productId] = (map[item.productId] || 0) + (item.quantity || 0);
+          });
+        });
+        setSalesQtyMap(map);
+      })
+      .catch(err => console.error('[POS] Chargement fréquences de vente:', err));
+  }, [ownerId]);
+
   const filteredProducts = useMemo(() => 
     products.filter(p => {
       const searchLower = searchTerm.toLowerCase();
@@ -234,9 +252,25 @@ export default function POS({ userProfile }: POSProps) {
       return (matchesName || matchesBarcode) && 
              (selectedCategory === 'all' || p.category === selectedCategory) &&
              p.stock > 0;
+    }).sort((a, b) => {
+      // Les produits les plus vendus en premier, puis ordre alphabétique
+      const qtyDiff = (salesQtyMap[b.id] || 0) - (salesQtyMap[a.id] || 0);
+      if (qtyDiff !== 0) return qtyDiff;
+      return a.name.localeCompare(b.name);
     }),
-    [products, searchTerm, selectedCategory]
+    [products, searchTerm, selectedCategory, salesQtyMap]
   );
+
+  // Top 3 des meilleures ventes (badge 🔥 sur les raccourcis)
+  const topSellerIds = useMemo(() => {
+    return new Set(
+      products
+        .filter(p => (salesQtyMap[p.id] || 0) > 0)
+        .sort((a, b) => (salesQtyMap[b.id] || 0) - (salesQtyMap[a.id] || 0))
+        .slice(0, 3)
+        .map(p => p.id)
+    );
+  }, [products, salesQtyMap]);
 
   const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && searchTerm.trim() !== '') {
@@ -272,7 +306,8 @@ export default function POS({ userProfile }: POSProps) {
         name: product.name,
         quantity: 1,
         price: product.sellPrice,
-        total: product.sellPrice
+        total: product.sellPrice,
+        buyPrice: product.buyPrice || 0 // Figé au moment de la vente
       }];
     });
   };
@@ -793,51 +828,70 @@ export default function POS({ userProfile }: POSProps) {
               onClick={() => addToCart(product)}
               disabled={product.stock <= 0}
               className={cn(
-                "bg-white p-2 rounded-xl border border-gray-150 shadow-3xs hover:border-indigo-500 hover:shadow-xs hover:-translate-y-0.5 transition-all duration-150 text-left flex flex-col justify-between group relative overflow-hidden h-[110px] min-w-0 w-full cursor-pointer",
+                "relative bg-white rounded-2xl border border-slate-200/80 shadow-3xs text-left flex flex-col justify-between group overflow-hidden h-[110px] min-w-0 w-full cursor-pointer transition-all duration-150",
+                "hover:border-transparent hover:shadow-lg hover:shadow-violet-500/15 hover:-translate-y-0.5 hover:ring-2 hover:ring-violet-500/60 active:scale-[0.97]",
                 product.stock <= 0 && "opacity-60 grayscale cursor-not-allowed"
               )}
             >
-              <div className="w-full flex justify-between items-start gap-1">
+              {/* Liseré dégradé signature en haut du carreau */}
+              <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-violet-600 via-fuchsia-500 to-violet-600 opacity-70 group-hover:opacity-100 transition-opacity"></div>
+
+              {/* Ligne haute : catégorie + badge top vente */}
+              <div className="w-full flex justify-between items-center gap-1 px-2 pt-2">
                 <span className={cn(
-                  "px-1 py-0.5 rounded text-[7px] font-black uppercase tracking-wider truncate max-w-[55%]",
-                  (() => {
-                    const cat = categories.find(c => c.name === product.category);
-                    if (!cat) return "bg-indigo-50 text-indigo-600";
-                    return cat.type === 'boissons' ? "bg-blue-50 text-blue-600" :
-                           cat.type === 'entretien' ? "bg-orange-50 text-orange-600" :
-                           cat.type === 'frais' ? "bg-purple-50 text-purple-600" :
-                           "bg-indigo-50 text-indigo-600";
-                  })()
+                  "flex items-center gap-1 text-[7px] font-black uppercase tracking-wider truncate max-w-[60%] text-slate-400"
                 )}>
+                  <span className={cn(
+                    "w-1.5 h-1.5 rounded-full shrink-0",
+                    (() => {
+                      const cat = categories.find(c => c.name === product.category);
+                      if (!cat) return "bg-violet-500";
+                      return cat.type === 'boissons' ? "bg-blue-500" :
+                             cat.type === 'entretien' ? "bg-orange-500" :
+                             cat.type === 'frais' ? "bg-fuchsia-500" :
+                             "bg-violet-500";
+                    })()
+                  )}></span>
                   {product.category}
                 </span>
-                <div className="flex flex-col items-end text-right min-w-0">
-                  <span className={cn(
-                    "text-[8px] font-bold uppercase",
-                    product.stock <= 5 ? "text-rose-600 font-black bg-rose-50 px-0.5 rounded" : "text-gray-400"
-                  )}>
-                    Stk: {product.stock}
+                {topSellerIds.has(product.id) ? (
+                  <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-orange-500 text-white text-[7px] font-black uppercase tracking-wider shadow-xs shrink-0">
+                    <Flame className="w-2.5 h-2.5" /> Top
                   </span>
-                </div>
+                ) : (salesQtyMap[product.id] || 0) > 0 ? (
+                  <span className="text-[7px] font-black text-violet-400 uppercase tracking-wider shrink-0">
+                    {salesQtyMap[product.id]} vendus
+                  </span>
+                ) : null}
               </div>
 
-              <div className="flex-1 flex items-center py-1 min-w-0 w-full">
-                <h3 className="font-extrabold text-slate-800 text-[11px] leading-tight break-words whitespace-normal overflow-hidden line-clamp-2 text-ellipsis group-hover:text-indigo-600 w-full">
+              {/* Nom du produit */}
+              <div className="flex-1 flex items-center px-2 py-0.5 min-w-0 w-full">
+                <h3 className="font-extrabold text-slate-800 text-[11px] leading-tight break-words whitespace-normal overflow-hidden line-clamp-2 text-ellipsis group-hover:text-violet-700 transition-colors w-full">
                   {product.name}
                 </h3>
               </div>
 
-              <div className="w-full pt-1 flex items-center justify-between mt-auto border-t border-gray-100">
-                <span className="text-[11px] font-black text-indigo-600 truncate">
-                  {product.sellPrice.toFixed(3)} <span className="text-[8px] font-semibold">{currency}</span>
-                </span>
-                <div className="w-5 h-5 rounded-full bg-indigo-50 text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-all duration-100 shrink-0 flex items-center justify-center shadow-3xs">
-                  <Plus className="w-3 h-3 font-black" />
+              {/* Pied : prix, stock et bouton + */}
+              <div className="w-full px-2 pb-2 flex items-center justify-between gap-1 mt-auto">
+                <div className="min-w-0">
+                  <span className="text-[12px] font-black bg-gradient-to-r from-violet-700 to-fuchsia-600 bg-clip-text text-transparent truncate block leading-none">
+                    {product.sellPrice.toFixed(3)} <span className="text-[8px] font-bold">{currency}</span>
+                  </span>
+                  <span className={cn(
+                    "text-[7px] font-black uppercase tracking-wider",
+                    product.stock <= 5 ? "text-rose-600" : "text-slate-400"
+                  )}>
+                    Stock {product.stock}
+                  </span>
+                </div>
+                <div className="w-6 h-6 rounded-full bg-violet-50 text-violet-600 group-hover:bg-gradient-to-r group-hover:from-violet-600 group-hover:to-fuchsia-600 group-hover:text-white group-hover:scale-110 transition-all duration-150 shrink-0 flex items-center justify-center shadow-3xs">
+                  <Plus className="w-3.5 h-3.5" />
                 </div>
               </div>
 
               {product.stock <= 0 && (
-                <div className="absolute inset-0 bg-white/70 backdrop-blur-[1px] rounded-xl flex items-center justify-center p-1 text-center">
+                <div className="absolute inset-0 bg-white/70 backdrop-blur-[1px] rounded-2xl flex items-center justify-center p-1 text-center">
                   <div className="bg-rose-600 text-white px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider shadow-xs">
                     Rupture
                   </div>
