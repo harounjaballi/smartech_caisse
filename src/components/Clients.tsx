@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, orderBy, where } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, orderBy, where, getDocs, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Client, StoreSettings, UserProfile } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
@@ -141,9 +141,50 @@ export default function Clients({ userProfile }: ClientsProps) {
     if (!settlingClient) return;
     try {
       const newDebt = Math.max(0, settlingClient.debt - settleAmount);
-      await updateDoc(doc(db, 'clients', settlingClient.id), {
-        debt: newDebt
-      });
+
+      // Répartir le règlement sur les ventes impayées du client (les plus anciennes d'abord),
+      // afin que l'historique des transactions reflète le paiement au lieu de rester "dette".
+      const salesSnap = await getDocs(query(
+        collection(db, 'sales'),
+        where('ownerId', '==', ownerId),
+        where('clientId', '==', settlingClient.id)
+      ));
+
+      const parseSaleDate = (d: any): number => {
+        if (!d) return 0;
+        if (typeof d.toDate === 'function') return d.toDate().getTime();
+        const t = new Date(d).getTime();
+        return isNaN(t) ? 0 : t;
+      };
+
+      const unpaidSales = salesSnap.docs
+        .map(d => ({ ref: d.ref, data: d.data() as any }))
+        .filter(s => (s.data.debt || 0) > 0.0005)
+        .sort((a, b) => parseSaleDate(a.data.date) - parseSaleDate(b.data.date));
+
+      const batch = writeBatch(db);
+      let remaining = settleAmount;
+
+      for (const s of unpaidSales) {
+        if (remaining <= 0.0005) break;
+        const saleDebt = s.data.debt || 0;
+        const payment = Math.min(remaining, saleDebt);
+        const newSaleDebt = Math.round((saleDebt - payment) * 1000) / 1000;
+        const newSalePaid = Math.round(((s.data.paid || 0) + payment) * 1000) / 1000;
+
+        batch.update(s.ref, { debt: newSaleDebt, paid: newSalePaid });
+
+        // Synchroniser la facture liée (elle duplique paid/debt)
+        if (s.data.invoiceId) {
+          batch.update(doc(db, 'invoices', s.data.invoiceId), { debt: newSaleDebt, paid: newSalePaid });
+        }
+
+        remaining = Math.round((remaining - payment) * 1000) / 1000;
+      }
+
+      batch.update(doc(db, 'clients', settlingClient.id), { debt: newDebt });
+
+      await batch.commit();
       closeSettleModal();
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'clients');
