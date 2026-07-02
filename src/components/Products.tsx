@@ -197,6 +197,16 @@ export default function Products({ userProfile }: ProductsProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+
+    // Garde-fou : le prix de vente doit être supérieur ou égal au prix d'achat,
+    // sinon chaque vente de ce produit génère un bénéfice négatif.
+    if ((formData.sellPrice || 0) < (formData.buyPrice || 0)) {
+      setErrorMsg(
+        `Le prix de vente (${(formData.sellPrice || 0).toFixed(3)}) doit être supérieur ou égal au prix d'achat (${(formData.buyPrice || 0).toFixed(3)}). Vendre en dessous du prix d'achat génère une perte sur chaque vente.`
+      );
+      return;
+    }
+
     try {
       if (editingProduct) {
         const oldStock = editingProduct.stock || 0;
