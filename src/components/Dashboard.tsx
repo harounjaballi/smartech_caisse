@@ -569,6 +569,7 @@ export default function Dashboard({ userProfile }: DashboardProps) {
   // Remaining Stock valuation and profit margins calculations - automatically refreshed in real-time
   const stockValuation = useMemo(() => {
     let totalItemsCount = 0;
+    let inStockItemsCount = 0; // Produits réellement existants en stock (quantité > 0)
     let totalStockQty = 0;
     let totalBuyValue = 0;
     let totalSellValue = 0; // Estimated revenues
@@ -576,6 +577,7 @@ export default function Dashboard({ userProfile }: DashboardProps) {
     products.forEach(p => {
       const stock = p.stock || 0;
       totalItemsCount += 1;
+      if (stock > 0) inStockItemsCount += 1;
       totalStockQty += stock;
       totalBuyValue += stock * (p.buyPrice || 0);
       totalSellValue += stock * (p.sellPrice || 0);
@@ -586,6 +588,8 @@ export default function Dashboard({ userProfile }: DashboardProps) {
     
     return {
       totalItemsCount,
+      inStockItemsCount,
+      outOfStockCount: totalItemsCount - inStockItemsCount,
       totalStockQty,
       totalBuyValue,
       totalSellValue,
@@ -673,6 +677,24 @@ export default function Dashboard({ userProfile }: DashboardProps) {
 
         const ws = XLSX.utils.json_to_sheet(rows);
         const wb = XLSX.utils.book_new();
+
+        // Feuille de synthèse : état instantané du stock
+        const now = new Date();
+        const summaryRows = [
+          { 'Indicateur': 'Date et heure du calcul', 'Valeur': `${now.toLocaleDateString('fr-FR')} ${now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}` },
+          { 'Indicateur': 'Produits existants en stock (quantité > 0)', 'Valeur': stockValuation.inStockItemsCount },
+          { 'Indicateur': 'Références totales répertoriées', 'Valeur': stockValuation.totalItemsCount },
+          { 'Indicateur': 'Produits en rupture de stock', 'Valeur': stockValuation.outOfStockCount },
+          { 'Indicateur': 'Quantité totale en stock (unités)', 'Valeur': stockValuation.totalStockQty },
+          { 'Indicateur': `Valeur du stock à cet instant — Achat (${currency})`, 'Valeur': stockValuation.totalBuyValue.toFixed(3) },
+          { 'Indicateur': `Valeur du stock à cet instant — Vente potentielle (${currency})`, 'Valeur': stockValuation.totalSellValue.toFixed(3) },
+          { 'Indicateur': `Marge théorique estimée (${currency})`, 'Valeur': stockValuation.theoreticalMargin.toFixed(3) },
+          { 'Indicateur': 'Taux de marge moyen (%)', 'Valeur': stockValuation.marginRatio.toFixed(1) + '%' }
+        ];
+        const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
+        wsSummary['!cols'] = [{ wch: 48 }, { wch: 24 }];
+        XLSX.utils.book_append_sheet(wb, wsSummary, 'Synthèse');
+
         XLSX.utils.book_append_sheet(wb, ws, 'Valorisation Stock');
         XLSX.writeFile(wb, `Rapport_Valorisation_Stock_${new Date().toISOString().split('T')[0]}.xlsx`);
         return;
@@ -1437,6 +1459,47 @@ export default function Dashboard({ userProfile }: DashboardProps) {
                 </div>
               )}
             </div>
+
+            {/* Synthèse instantanée du stock (Rapport de Valorisation) */}
+            {activeModal === 'stock' && (
+              <div className="px-6 pt-5 shrink-0 font-sans">
+                <div className="bg-gradient-to-r from-indigo-600 via-indigo-700 to-violet-700 rounded-2xl p-5 text-white shadow-lg shadow-indigo-600/15 relative overflow-hidden">
+                  <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-white/10 to-transparent pointer-events-none"></div>
+                  <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center backdrop-blur-xs shrink-0">
+                        <Package className="w-5 h-5 text-indigo-50" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-black uppercase tracking-widest text-indigo-100/80 block">Produits existants en stock</span>
+                        <div className="flex items-baseline gap-1.5 mt-0.5">
+                          <span className="text-2xl font-black font-mono leading-none">{stockValuation.inStockItemsCount}</span>
+                          <span className="text-[11px] font-bold text-indigo-100/80">/ {stockValuation.totalItemsCount} références</span>
+                        </div>
+                        {stockValuation.outOfStockCount > 0 && (
+                          <span className="text-[9px] font-bold uppercase text-amber-200/90 block mt-0.5">{stockValuation.outOfStockCount} produit(s) en rupture</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="hidden md:block w-px h-12 bg-white/15"></div>
+                    <div>
+                      <span className="text-[10px] font-black uppercase tracking-widest text-indigo-100/80 block">Valeur de mon stock à cet instant</span>
+                      <div className="flex items-baseline gap-1.5 mt-0.5">
+                        <span className="text-2xl font-black font-mono leading-none">{stockValuation.totalBuyValue.toFixed(3)}</span>
+                        <span className="text-[11px] font-bold text-indigo-100/80">{currency} (valeur d'achat)</span>
+                      </div>
+                      <span className="text-[9px] font-bold uppercase text-indigo-100/70 block mt-0.5">Soit {stockValuation.totalSellValue.toFixed(3)} {currency} en valeur de vente potentielle</span>
+                    </div>
+                    <div className="hidden md:block w-px h-12 bg-white/15"></div>
+                    <div className="text-right md:text-left">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-indigo-100/80 block">Calculé le</span>
+                      <span className="text-xs font-black font-mono block mt-1">{new Date().toLocaleDateString('fr-FR')} à {new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
+                      <span className="text-[9px] font-bold uppercase text-indigo-100/70 block mt-0.5">Temps réel · inventaire actuel</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Modal Table Area (Scrollable body) */}
             <div className="flex-1 overflow-auto font-sans">
