@@ -268,6 +268,7 @@ export default function POS({ userProfile }: POSProps) {
       }
     };
     window.addEventListener('keydown', handler);
+    console.log('[POS] Raccourcis clavier armés (F1/F2/F4/Entrée/Échap)');
     return () => window.removeEventListener('keydown', handler);
   }, [cart.length, isProcessing, saleSuccess]);
 
