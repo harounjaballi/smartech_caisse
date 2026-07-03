@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { collection, onSnapshot, addDoc, updateDoc, doc, query, orderBy, serverTimestamp, runTransaction, getDoc, setDoc, getDocs, where } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -356,6 +356,15 @@ export default function POS({ userProfile }: POSProps) {
     }
   }, [cart, selectedCartItemId]);
 
+  // Refs toujours à jour pour éviter les closures périmées dans le handler clavier global
+  // (initialisées à vide car validateSale est déclarée plus bas dans le composant)
+  const validateSaleRef = useRef<(isCredit?: boolean, creditPaid?: number) => void>(() => {});
+  const updateQuantityRef = useRef<(productId: string, delta: number) => void>(() => {});
+  useEffect(() => {
+    validateSaleRef.current = validateSale;
+    updateQuantityRef.current = updateQuantity;
+  });
+
   // Raccourcis clavier globaux du POS :
   // - Entrée = Encaisser & Valider (ou "Nouvelle Vente" si le ticket de succès est affiché)
   // - Flèches ↑/↓ = choisir un article du panier | ←/→ = diminuer/augmenter sa quantité
@@ -385,7 +394,7 @@ export default function POS({ userProfile }: POSProps) {
         if (e.defaultPrevented) return;
         if (cart.length > 0 && !isProcessing) {
           e.preventDefault();
-          validateSale(false);
+          validateSaleRef.current(false);
         }
         return;
       }
@@ -403,11 +412,11 @@ export default function POS({ userProfile }: POSProps) {
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
         setSelectedCartItemId(cart[currentIdx].productId);
-        updateQuantity(cart[currentIdx].productId, 1);
+        updateQuantityRef.current(cart[currentIdx].productId, 1);
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault();
         setSelectedCartItemId(cart[currentIdx].productId);
-        updateQuantity(cart[currentIdx].productId, -1);
+        updateQuantityRef.current(cart[currentIdx].productId, -1);
       }
     };
 
