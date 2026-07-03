@@ -423,26 +423,39 @@ export default function POS({ userProfile }: POSProps) {
     }
   };
 
-  const validateSale = async () => {
+  const validateSale = async (isCredit: boolean = false) => {
     if (cart.length === 0) return;
+
+    // Crédit : un client enregistré est obligatoire (impossible pour un client de passage)
+    if (isCredit && !selectedClient) {
+      setError('Veuillez sélectionner un client. Un crédit ne peut pas être enregistré pour un client de passage.');
+      return;
+    }
+
     setIsProcessing(true);
     setError(null);
-    console.log('Starting POS validation...', { cart, selectedClient, paidAmount });
+    console.log('Starting POS validation...', { cart, selectedClient, paidAmount, isCredit });
 
-    // Règle de paiement selon le type de client
-    if (!selectedClient) {
-      if (Math.abs(paidAmount - cartTotal) > 0.001) {
-        setError(`Pour un client passagé, le montant payé doit être obligatoirement égal au montant total de la vente (${cartTotal.toFixed(3)} ${currency}).`);
-        setIsProcessing(false);
-        return;
-      }
-    } else {
-      if (paidAmount > cartTotal + 0.001) {
-        setError(`Le montant payé ne peut pas dépasser le montant total de la vente (${cartTotal.toFixed(3)} ${currency}).`);
-        setIsProcessing(false);
-        return;
+    // Règle de paiement selon le type de client (ignorée en mode crédit : rien n'est encaissé)
+    if (!isCredit) {
+      if (!selectedClient) {
+        if (Math.abs(paidAmount - cartTotal) > 0.001) {
+          setError(`Pour un client passagé, le montant payé doit être obligatoirement égal au montant total de la vente (${cartTotal.toFixed(3)} ${currency}).`);
+          setIsProcessing(false);
+          return;
+        }
+      } else {
+        if (paidAmount > cartTotal + 0.001) {
+          setError(`Le montant payé ne peut pas dépasser le montant total de la vente (${cartTotal.toFixed(3)} ${currency}).`);
+          setIsProcessing(false);
+          return;
+        }
       }
     }
+
+    // Montants effectifs : en mode crédit, rien n'est payé et la totalité passe en dette
+    const effPaid = isCredit ? 0 : paidAmount;
+    const effDebt = isCredit ? cartTotal : remainingDebt;
 
     const isOffline = !navigator.onLine;
 
@@ -476,11 +489,11 @@ export default function POS({ userProfile }: POSProps) {
 
         // Validate client locally
         let clientUpdate = null;
-        if (selectedClient && remainingDebt > 0) {
+        if (selectedClient && effDebt > 0) {
           const currentDebt = selectedClient.debt || 0;
           clientUpdate = {
             ref: doc(db, 'clients', selectedClient.id),
-            newDebt: currentDebt + remainingDebt
+            newDebt: currentDebt + effDebt
           };
         }
 
@@ -505,8 +518,8 @@ export default function POS({ userProfile }: POSProps) {
           clientCode: selectedClient?.code || '',
           clientName: selectedClient?.name || 'Client de passage',
           total: cartTotal,
-          paid: paidAmount,
-          debt: remainingDebt,
+          paid: effPaid,
+          debt: effDebt,
           tva: tvaAmount,
           items: cart,
           invoiceId: invoiceId,
@@ -523,8 +536,8 @@ export default function POS({ userProfile }: POSProps) {
           clientPhone: selectedClient?.phone || '',
           clientAddress: selectedClient?.address || '',
           total: cartTotal,
-          paid: paidAmount,
-          debt: remainingDebt,
+          paid: effPaid,
+          debt: effDebt,
           tva: tvaAmount,
           date: new Date().toISOString(),
           items: cart,
@@ -557,7 +570,7 @@ export default function POS({ userProfile }: POSProps) {
           );
 
           let clientSnap = null;
-          if (selectedClient && remainingDebt > 0) {
+          if (selectedClient && effDebt > 0) {
             clientSnap = await transaction.get(doc(db, 'clients', selectedClient.id));
           }
 
@@ -587,12 +600,12 @@ export default function POS({ userProfile }: POSProps) {
 
           // Validate client
           let clientUpdate = null;
-          if (selectedClient && remainingDebt > 0) {
+          if (selectedClient && effDebt > 0) {
             if (!clientSnap || !clientSnap.exists()) throw new Error(`Client introuvable`);
             const currentDebt = clientSnap.data().debt || 0;
             clientUpdate = {
               ref: doc(db, 'clients', selectedClient.id),
-              newDebt: currentDebt + remainingDebt
+              newDebt: currentDebt + effDebt
             };
           }
 
@@ -617,8 +630,8 @@ export default function POS({ userProfile }: POSProps) {
             clientCode: selectedClient?.code || '',
             clientName: selectedClient?.name || 'Client de passage',
             total: cartTotal,
-            paid: paidAmount,
-            debt: remainingDebt,
+            paid: effPaid,
+            debt: effDebt,
             tva: tvaAmount,
             items: cart,
             invoiceId: invoiceRef.id,
@@ -636,8 +649,8 @@ export default function POS({ userProfile }: POSProps) {
             clientPhone: selectedClient?.phone || '',
             clientAddress: selectedClient?.address || '',
             total: cartTotal,
-            paid: paidAmount,
-            debt: remainingDebt,
+            paid: effPaid,
+            debt: effDebt,
             tva: tvaAmount,
             date: serverTimestamp(),
             items: cart,
@@ -654,7 +667,7 @@ export default function POS({ userProfile }: POSProps) {
       }
 
       console.log('Sale committed successfully');
-      setSaleSuccess('Vente validée avec succès !');
+      setSaleSuccess(isCredit ? 'Vente enregistrée à crédit !' : 'Vente validée avec succès !');
       setLastInvoice(generatedInvoice);
       setCart([]);
       setReceivedCash(0);
@@ -1290,12 +1303,12 @@ export default function POS({ userProfile }: POSProps) {
                   </div>
                 </div>
 
-                {/* MAIN ACTIONS (Emerald button) */}
-                <div>
+                {/* MAIN ACTIONS (Emerald + Credit buttons) */}
+                <div className="flex gap-2">
                   <button
-                    onClick={validateSale}
+                    onClick={() => validateSale(false)}
                     disabled={cart.length === 0 || isProcessing}
-                    className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-emerald-950/30 active:scale-[0.98] disabled:opacity-40 disabled:scale-100 disabled:shadow-none flex items-center justify-center gap-1.5 cursor-pointer"
+                    className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-emerald-950/30 active:scale-[0.98] disabled:opacity-40 disabled:scale-100 disabled:shadow-none flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     {isProcessing ? 'Traitement...' : (
                       <>
@@ -1303,6 +1316,15 @@ export default function POS({ userProfile }: POSProps) {
                         Encaisser & Valider
                       </>
                     )}
+                  </button>
+                  <button
+                    onClick={() => validateSale(true)}
+                    disabled={cart.length === 0 || isProcessing}
+                    title="Enregistrer la totalité de la vente en crédit (client requis)"
+                    className="px-3 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-amber-950/30 active:scale-[0.98] disabled:opacity-40 disabled:scale-100 disabled:shadow-none flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <CreditCard className="w-4 h-4 shrink-0" />
+                    Crédité
                   </button>
                 </div>
               </div>
