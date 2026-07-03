@@ -1,4 +1,4 @@
-const CACHE_NAME = 'smartech-pos-v6';
+const CACHE_NAME = 'smartech-pos-v7';
 const ASSETS = [
   '/manifest.json',
   '/icon.svg',
