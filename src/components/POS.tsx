@@ -730,7 +730,7 @@ export default function POS({ userProfile }: POSProps) {
     <div className="flex flex-col gap-2.5 lg:h-[calc(100vh-130px)] min-h-0 relative">
 
       {/* Barre d'état de la caisse */}
-      <div className="bg-white border border-gray-150 rounded-xl px-3 py-2 flex items-center justify-between gap-2 shadow-3xs shrink-0">
+      <div className="bg-white border border-gray-150 rounded-xl px-3 py-1.5 flex items-center justify-between gap-2 shadow-3xs shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-600 to-fuchsia-600 flex items-center justify-center shrink-0">
             <ShoppingCart className="w-4 h-4 text-white" />
@@ -758,6 +758,13 @@ export default function POS({ userProfile }: POSProps) {
           <span className="hidden md:flex items-center gap-1 px-2 py-1 rounded-full bg-violet-50 border border-violet-100 text-[9px] font-black text-violet-700 uppercase tracking-wider truncate max-w-[140px]">
             <User className="w-3 h-3 shrink-0" />
             {userProfile?.name || userProfile?.email || 'Caissier'}
+          </span>
+          <span className="hidden xl:flex items-center gap-2 pl-2 ml-1 border-l border-slate-150 text-[8px] font-bold text-slate-400 uppercase tracking-wider">
+            <span><kbd className="px-1 py-0.5 bg-slate-50 border border-slate-200 rounded text-slate-600 font-black normal-case">F1</kbd> Rech.</span>
+            <span><kbd className="px-1 py-0.5 bg-slate-50 border border-slate-200 rounded text-slate-600 font-black normal-case">F2</kbd> Client</span>
+            <span><kbd className="px-1 py-0.5 bg-slate-50 border border-slate-200 rounded text-slate-600 font-black normal-case">F4</kbd> Remise</span>
+            <span><kbd className="px-1 py-0.5 bg-slate-50 border border-slate-200 rounded text-slate-600 font-black normal-case">↵</kbd> Encaisser</span>
+            <span><kbd className="px-1 py-0.5 bg-slate-50 border border-slate-200 rounded text-slate-600 font-black normal-case">Échap</kbd> Vider</span>
           </span>
         </div>
       </div>
@@ -1043,7 +1050,7 @@ export default function POS({ userProfile }: POSProps) {
           </div>
 
           {/* Table representing the list of items in the Cart (Ticket columns) */}
-          <div className="flex-1 overflow-y-auto p-3 min-h-0 scrollbar-thin">
+          <div className="flex-1 overflow-y-auto p-3 min-h-[180px] scrollbar-thin">
             {cart.length === 0 ? (
               <div className="h-full py-16 flex flex-col items-center justify-center text-slate-350 gap-2">
                 <ShoppingCart className="w-12 h-12 opacity-30" />
@@ -1503,21 +1510,6 @@ export default function POS({ userProfile }: POSProps) {
       )}
     </div>
 
-      {/* Bandeau des raccourcis clavier */}
-      <div className="hidden lg:flex items-center justify-center gap-4 shrink-0 py-0.5">
-        {[
-          ['F1', 'Recherche'],
-          ['F2', 'Client'],
-          ['F4', 'Remise'],
-          ['Entrée', 'Encaisser'],
-          ['Échap', 'Vider panier']
-        ].map(([key, label]) => (
-          <span key={key} className="text-[9px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-            <kbd className="px-1.5 py-0.5 bg-white border border-slate-200 rounded-md text-slate-600 font-black shadow-3xs normal-case">{key}</kbd>
-            {label}
-          </span>
-        ))}
-      </div>
     </div>
   );
 }
