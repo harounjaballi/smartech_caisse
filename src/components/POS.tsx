@@ -290,6 +290,9 @@ export default function POS({ userProfile }: POSProps) {
     }
   };
 
+  // Article du panier sélectionné pour le contrôle clavier (flèches)
+  const [selectedCartItemId, setSelectedCartItemId] = useState<string | null>(null);
+
   const addToCart = (product: Product) => {
     setCart(prev => {
       const existing = prev.find(item => item.productId === product.id);
@@ -305,15 +308,17 @@ export default function POS({ userProfile }: POSProps) {
             : item
         );
       }
-      return [...prev, {
+      // Le dernier article ajouté apparaît en haut du ticket
+      return [{
         productId: product.id,
         name: product.name,
         quantity: 1,
         price: product.sellPrice,
         total: product.sellPrice,
         buyPrice: product.buyPrice || 0 // Figé au moment de la vente
-      }];
+      }, ...prev];
     });
+    setSelectedCartItemId(product.id);
   };
 
   const updateQuantity = (productId: string, delta: number) => {
@@ -339,6 +344,76 @@ export default function POS({ userProfile }: POSProps) {
   const removeFromCart = (productId: string) => {
     setCart(prev => prev.filter(item => item.productId !== productId));
   };
+
+  // Garde une sélection valide dans le panier (par défaut : l'article en haut, le dernier ajouté)
+  useEffect(() => {
+    if (cart.length === 0) {
+      if (selectedCartItemId !== null) setSelectedCartItemId(null);
+      return;
+    }
+    if (!cart.some(i => i.productId === selectedCartItemId)) {
+      setSelectedCartItemId(cart[0].productId);
+    }
+  }, [cart, selectedCartItemId]);
+
+  // Raccourcis clavier globaux du POS :
+  // - Entrée = Encaisser & Valider (ou "Nouvelle Vente" si le ticket de succès est affiché)
+  // - Flèches ↑/↓ = choisir un article du panier | ←/→ = diminuer/augmenter sa quantité
+  useEffect(() => {
+    const handleGlobalKeys = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+      // Fenêtre ticket (succès) affichée : Entrée = Nouvelle Vente
+      if (saleSuccess) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          setSaleSuccess(null);
+          setLastInvoice(null);
+        }
+        return;
+      }
+
+      // Modale crédit ouverte : laisser le clavier à la modale
+      if (isCreditModalOpen) return;
+
+      const target = e.target as HTMLElement;
+      const isInputFocused = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable);
+      if (isInputFocused) return;
+
+      if (e.key === 'Enter') {
+        // Une Entrée déjà consommée par le scanner code-barres (defaultPrevented) est ignorée
+        if (e.defaultPrevented) return;
+        if (cart.length > 0 && !isProcessing) {
+          e.preventDefault();
+          validateSale(false);
+        }
+        return;
+      }
+
+      if (cart.length === 0) return;
+      const idx = cart.findIndex(i => i.productId === selectedCartItemId);
+      const currentIdx = idx >= 0 ? idx : 0;
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedCartItemId(cart[Math.min(cart.length - 1, currentIdx + 1)].productId);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedCartItemId(cart[Math.max(0, currentIdx - 1)].productId);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        setSelectedCartItemId(cart[currentIdx].productId);
+        updateQuantity(cart[currentIdx].productId, 1);
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setSelectedCartItemId(cart[currentIdx].productId);
+        updateQuantity(cart[currentIdx].productId, -1);
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeys);
+    return () => window.removeEventListener('keydown', handleGlobalKeys);
+  }, [saleSuccess, isCreditModalOpen, cart, isProcessing, selectedCartItemId]);
 
   const setQuantityDirect = (productId: string, newQty: number) => {
     const product = products.find(p => p.id === productId);
@@ -983,7 +1058,16 @@ export default function POS({ userProfile }: POSProps) {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {cart.map((item) => (
-                      <tr key={item.productId} className="hover:bg-slate-50/75 transition-colors group">
+                      <tr
+                        key={item.productId}
+                        onClick={() => setSelectedCartItemId(item.productId)}
+                        className={cn(
+                          "transition-colors group cursor-pointer",
+                          selectedCartItemId === item.productId
+                            ? "bg-indigo-50/90 shadow-[inset_2px_0_0_0_theme(colors.indigo.500)]"
+                            : "hover:bg-slate-50/75"
+                        )}
+                      >
                         <td className="py-3 px-3 text-left">
                           <p className="font-extrabold text-slate-800 text-xs sm:text-[13px] leading-snug break-words line-clamp-2" title={item.name}>
                             {item.name}
@@ -1280,6 +1364,17 @@ export default function POS({ userProfile }: POSProps) {
                           setReceivedCashInput(value);
                           const parsed = parseFloat(value) || 0;
                           setReceivedCash(Math.round(parsed * 1000) / 1000);
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        // Entrée = Encaisser & Valider, même depuis le champ Espèces reçues
+                        if (e.key === 'Enter' && cart.length > 0 && !isProcessing) {
+                          e.preventDefault();
+                          const parsed = parseFloat(receivedCashInput) || 0;
+                          const rounded = Math.round(parsed * 1000) / 1000;
+                          setReceivedCash(rounded);
+                          e.currentTarget.blur();
+                          validateSale(false);
                         }
                       }}
                       placeholder="0.000"
