@@ -41,6 +41,11 @@ export default function POS({ userProfile }: POSProps) {
   const [editingQtyId, setEditingQtyId] = useState<string | null>(null);
   const [editingQtyValue, setEditingQtyValue] = useState<string>('');
 
+  // Modale de vente à crédit
+  const [isCreditModalOpen, setIsCreditModalOpen] = useState(false);
+  const [creditPartialInput, setCreditPartialInput] = useState('');
+  const [creditModalError, setCreditModalError] = useState<string | null>(null);
+
   const handlePrint = () => {
     console.log('Impression du ticket en cours...', lastInvoice);
     if (!lastInvoice) {
@@ -423,7 +428,7 @@ export default function POS({ userProfile }: POSProps) {
     }
   };
 
-  const validateSale = async (isCredit: boolean = false) => {
+  const validateSale = async (isCredit: boolean = false, creditPaid: number = 0) => {
     if (cart.length === 0) return;
 
     // Crédit : un client enregistré est obligatoire (impossible pour un client de passage)
@@ -434,7 +439,7 @@ export default function POS({ userProfile }: POSProps) {
 
     setIsProcessing(true);
     setError(null);
-    console.log('Starting POS validation...', { cart, selectedClient, paidAmount, isCredit });
+    console.log('Starting POS validation...', { cart, selectedClient, paidAmount, isCredit, creditPaid });
 
     // Règle de paiement selon le type de client (ignorée en mode crédit : rien n'est encaissé)
     if (!isCredit) {
@@ -453,9 +458,9 @@ export default function POS({ userProfile }: POSProps) {
       }
     }
 
-    // Montants effectifs : en mode crédit, rien n'est payé et la totalité passe en dette
-    const effPaid = isCredit ? 0 : paidAmount;
-    const effDebt = isCredit ? cartTotal : remainingDebt;
+    // Montants effectifs : en mode crédit, la tranche éventuellement payée est encaissée, le reste passe en dette
+    const effPaid = isCredit ? Math.min(Math.max(0, Math.round(creditPaid * 1000) / 1000), cartTotal) : paidAmount;
+    const effDebt = isCredit ? Math.round((cartTotal - effPaid) * 1000) / 1000 : remainingDebt;
 
     const isOffline = !navigator.onLine;
 
@@ -1318,9 +1323,19 @@ export default function POS({ userProfile }: POSProps) {
                     )}
                   </button>
                   <button
-                    onClick={() => validateSale(true)}
+                    onClick={() => {
+                      if (cart.length === 0) return;
+                      if (!selectedClient) {
+                        setError('Veuillez sélectionner un client. Un crédit ne peut pas être enregistré pour un client de passage.');
+                        return;
+                      }
+                      setError(null);
+                      setCreditPartialInput('');
+                      setCreditModalError(null);
+                      setIsCreditModalOpen(true);
+                    }}
                     disabled={cart.length === 0 || isProcessing}
-                    title="Enregistrer la totalité de la vente en crédit (client requis)"
+                    title="Enregistrer la vente en crédit (client requis)"
                     className="px-3 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-amber-950/30 active:scale-[0.98] disabled:opacity-40 disabled:scale-100 disabled:shadow-none flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     <CreditCard className="w-4 h-4 shrink-0" />
@@ -1349,6 +1364,115 @@ export default function POS({ userProfile }: POSProps) {
 
         </div>
       </div>
+
+      {/* Credit Sale Modal */}
+      {isCreditModalOpen && selectedClient && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-white p-6 rounded-3xl shadow-2xl max-w-sm w-full border border-gray-100 scale-in duration-200">
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-black text-gray-900 flex items-center gap-2">
+                  <CreditCard className="w-5 h-5 text-amber-600 shrink-0" />
+                  Vente à crédit
+                </h3>
+                <p className="text-xs text-gray-500 font-semibold mt-0.5">
+                  Client : <span className="text-gray-800">{selectedClient.name}</span>
+                </p>
+              </div>
+              <button
+                onClick={() => setIsCreditModalOpen(false)}
+                className="p-1.5 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 mb-4 flex items-center justify-between">
+              <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Total de la vente</span>
+              <span className="text-lg font-black text-gray-900">{cartTotal.toFixed(3)} {currency}</span>
+            </div>
+
+            {/* Option 1 : tout créditer */}
+            <button
+              onClick={() => {
+                setIsCreditModalOpen(false);
+                validateSale(true, 0);
+              }}
+              disabled={isProcessing}
+              className="w-full py-2.5 mb-3 bg-amber-600 hover:bg-amber-500 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-amber-200 active:scale-[0.98] disabled:opacity-40 flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <CreditCard className="w-4 h-4 shrink-0" />
+              Créditer tout le montant
+            </button>
+
+            <div className="flex items-center gap-3 mb-3">
+              <div className="flex-1 h-px bg-gray-200" />
+              <span className="text-[10px] font-black text-gray-400 uppercase">ou</span>
+              <div className="flex-1 h-px bg-gray-200" />
+            </div>
+
+            {/* Option 2 : tranche payée + reste en crédit */}
+            <label className="block text-[10px] font-black text-gray-500 uppercase tracking-wider mb-1.5">
+              Le client paie une tranche maintenant
+            </label>
+            <div className="relative mb-2">
+              <Coins className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.001"
+                value={creditPartialInput}
+                onChange={(e) => {
+                  setCreditPartialInput(e.target.value);
+                  setCreditModalError(null);
+                }}
+                placeholder="0.000"
+                className="w-full pl-9 pr-14 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:border-amber-500"
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-black text-gray-400">{currency}</span>
+            </div>
+
+            {(() => {
+              const tranche = parseFloat(creditPartialInput) || 0;
+              const reste = Math.max(0, Math.round((cartTotal - tranche) * 1000) / 1000);
+              return tranche > 0 && tranche < cartTotal ? (
+                <p className="text-[11px] font-bold text-gray-500 mb-3">
+                  Reste en crédit : <span className="text-amber-600 font-black">{reste.toFixed(3)} {currency}</span>
+                </p>
+              ) : null;
+            })()}
+
+            {creditModalError && (
+              <div className="p-2 mb-3 bg-rose-50 border border-rose-200 rounded-lg flex items-center gap-1.5 text-rose-600 text-[11px] font-semibold">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                <span className="leading-tight">{creditModalError}</span>
+              </div>
+            )}
+
+            <button
+              onClick={() => {
+                const tranche = parseFloat(creditPartialInput) || 0;
+                if (tranche <= 0) {
+                  setCreditModalError('Saisissez le montant payé par le client, ou choisissez « Créditer tout le montant ».');
+                  return;
+                }
+                if (tranche >= cartTotal) {
+                  setCreditModalError(`La tranche doit être inférieure au total (${cartTotal.toFixed(3)} ${currency}). Pour un paiement complet, utilisez « Encaisser & Valider ».`);
+                  return;
+                }
+                setIsCreditModalOpen(false);
+                validateSale(true, tranche);
+              }}
+              disabled={isProcessing}
+              className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all active:scale-[0.98] disabled:opacity-40 flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <CheckCircle className="w-4 h-4 shrink-0" />
+              Encaisser la tranche & créditer le reste
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Success Overlay */}
       {saleSuccess && (
