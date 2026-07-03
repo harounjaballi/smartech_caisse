@@ -41,17 +41,6 @@ export default function POS({ userProfile }: POSProps) {
   const [editingQtyId, setEditingQtyId] = useState<string | null>(null);
   const [editingQtyValue, setEditingQtyValue] = useState<string>('');
 
-  // Refs et horloge pour la barre d'état et les raccourcis clavier
-  const searchInputRef = React.useRef<HTMLInputElement>(null);
-  const discountInputRef = React.useRef<HTMLInputElement>(null);
-  const clientSelectRef = React.useRef<HTMLSelectElement>(null);
-  const validateSaleRef = React.useRef<() => void>(() => {});
-  const [clock, setClock] = useState(new Date());
-  useEffect(() => {
-    const t = setInterval(() => setClock(new Date()), 30000);
-    return () => clearInterval(t);
-  }, []);
-
   const handlePrint = () => {
     console.log('Impression du ticket en cours...', lastInvoice);
     if (!lastInvoice) {
@@ -231,47 +220,6 @@ export default function POS({ userProfile }: POSProps) {
     };
   }, [scannerActive, products]);
 
-  // Raccourcis clavier de caisse : F1 recherche, F2 client, F4 remise, Entrée encaisser, Échap vider
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      const typing = !!target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable);
-
-      if (e.key === 'F1') {
-        e.preventDefault();
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
-        return;
-      }
-      if (e.key === 'F2') {
-        e.preventDefault();
-        clientSelectRef.current?.focus();
-        return;
-      }
-      if (e.key === 'F4') {
-        e.preventDefault();
-        discountInputRef.current?.focus();
-        discountInputRef.current?.select();
-        return;
-      }
-      if (saleSuccess) return; // Ne pas interférer avec l'écran de succès
-      if (e.key === 'Escape' && !typing && cart.length > 0) {
-        setCart([]);
-        setDiscount(0);
-        setDiscountInput('0');
-        setScanNotification({ message: 'Panier vidé (Échap)', type: 'success' });
-        return;
-      }
-      if (e.key === 'Enter' && !typing && cart.length > 0 && !isProcessing) {
-        e.preventDefault();
-        validateSaleRef.current();
-      }
-    };
-    window.addEventListener('keydown', handler);
-    console.log('[POS] Raccourcis clavier armés (F1/F2/F4/Entrée/Échap)');
-    return () => window.removeEventListener('keydown', handler);
-  }, [cart.length, isProcessing, saleSuccess]);
-
   // Fréquence de vente par produit (quantités cumulées) pour trier les raccourcis
   const [salesQtyMap, setSalesQtyMap] = useState<Record<string, number>>({});
   useEffect(() => {
@@ -305,7 +253,6 @@ export default function POS({ userProfile }: POSProps) {
              (selectedCategory === 'all' || p.category === selectedCategory) &&
              p.stock > 0;
     }).sort((a, b) => {
-      // Les produits les plus vendus en premier, puis ordre alphabétique
       const qtyDiff = (salesQtyMap[b.id] || 0) - (salesQtyMap[a.id] || 0);
       if (qtyDiff !== 0) return qtyDiff;
       return a.name.localeCompare(b.name);
@@ -313,7 +260,7 @@ export default function POS({ userProfile }: POSProps) {
     [products, searchTerm, selectedCategory, salesQtyMap]
   );
 
-  // Top 3 des meilleures ventes (badge 🔥 sur les raccourcis)
+  // Top 3 des meilleures ventes (badge sur les raccourcis)
   const topSellerIds = useMemo(() => {
     return new Set(
       products
@@ -724,52 +671,8 @@ export default function POS({ userProfile }: POSProps) {
     }
   };
 
-  validateSaleRef.current = validateSale;
-
   return (
-    <div className="flex flex-col gap-2.5 lg:h-[calc(100vh-130px)] min-h-0 relative">
-
-      {/* Barre d'état de la caisse */}
-      <div className="bg-white border border-gray-150 rounded-xl px-3 py-1.5 flex items-center justify-between gap-2 shadow-3xs shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-600 to-fuchsia-600 flex items-center justify-center shrink-0">
-            <ShoppingCart className="w-4 h-4 text-white" />
-          </div>
-          <span className="text-xs font-black text-slate-800 uppercase tracking-wider truncate">
-            Caisse{storeSettings?.storeName ? ` · ${storeSettings.storeName}` : ''}
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            type="button"
-            onClick={() => setScannerActive(!scannerActive)}
-            className={cn(
-              "flex items-center gap-1 px-2 py-1 rounded-full text-[9px] font-black uppercase tracking-wider transition-colors cursor-pointer",
-              scannerActive ? "bg-emerald-50 text-emerald-700 border border-emerald-150" : "bg-slate-100 text-slate-500 border border-slate-200"
-            )}
-          >
-            <Barcode className="w-3 h-3" />
-            <span className="hidden sm:inline">{scannerActive ? 'Scanner actif' : 'Scanner inactif'}</span>
-            <span className={cn("w-1.5 h-1.5 rounded-full", scannerActive ? "bg-emerald-500 animate-pulse" : "bg-slate-400")} />
-          </button>
-          <span className="flex items-center gap-1 px-2 py-1 rounded-full bg-slate-50 border border-slate-150 text-[9px] font-black text-slate-600 uppercase tracking-wider font-mono">
-            {clock.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-          </span>
-          <span className="hidden md:flex items-center gap-1 px-2 py-1 rounded-full bg-violet-50 border border-violet-100 text-[9px] font-black text-violet-700 uppercase tracking-wider truncate max-w-[140px]">
-            <User className="w-3 h-3 shrink-0" />
-            {userProfile?.name || userProfile?.email || 'Caissier'}
-          </span>
-          <span className="hidden xl:flex items-center gap-2 pl-2 ml-1 border-l border-slate-150 text-[8px] font-bold text-slate-400 uppercase tracking-wider">
-            <span><kbd className="px-1 py-0.5 bg-slate-50 border border-slate-200 rounded text-slate-600 font-black normal-case">F1</kbd> Rech.</span>
-            <span><kbd className="px-1 py-0.5 bg-slate-50 border border-slate-200 rounded text-slate-600 font-black normal-case">F2</kbd> Client</span>
-            <span><kbd className="px-1 py-0.5 bg-slate-50 border border-slate-200 rounded text-slate-600 font-black normal-case">F4</kbd> Remise</span>
-            <span><kbd className="px-1 py-0.5 bg-slate-50 border border-slate-200 rounded text-slate-600 font-black normal-case">↵</kbd> Encaisser</span>
-            <span><kbd className="px-1 py-0.5 bg-slate-50 border border-slate-200 rounded text-slate-600 font-black normal-case">Échap</kbd> Vider</span>
-          </span>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1 min-h-0 relative">
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:h-[calc(100vh-130px)] min-h-0 relative">
       {/* Hidden printable ticket for POS - Render outside #root using Portal */}
       {createPortal(
         <div className="print-container">
@@ -878,8 +781,7 @@ export default function POS({ userProfile }: POSProps) {
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
               type="text"
-              placeholder="Rechercher nom ou code barre... (F1)"
-              ref={searchInputRef}
+              placeholder="Rechercher nom ou code barre..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               onKeyDown={handleSearchKeyDown}
@@ -930,14 +832,10 @@ export default function POS({ userProfile }: POSProps) {
                 product.stock <= 0 && "opacity-60 grayscale cursor-not-allowed"
               )}
             >
-              {/* Liseré dégradé signature en haut du carreau */}
               <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-violet-600 via-fuchsia-500 to-violet-600 opacity-70 group-hover:opacity-100 transition-opacity"></div>
 
-              {/* Ligne haute : catégorie + badge top vente */}
               <div className="w-full flex justify-between items-center gap-1 px-2 pt-2">
-                <span className={cn(
-                  "flex items-center gap-1 text-[7px] font-black uppercase tracking-wider truncate max-w-[60%] text-slate-400"
-                )}>
+                <span className="flex items-center gap-1 text-[7px] font-black uppercase tracking-wider truncate max-w-[60%] text-slate-400">
                   <span className={cn(
                     "w-1.5 h-1.5 rounded-full shrink-0",
                     (() => {
@@ -962,14 +860,12 @@ export default function POS({ userProfile }: POSProps) {
                 ) : null}
               </div>
 
-              {/* Nom du produit */}
               <div className="flex-1 flex items-center px-2 py-0.5 min-w-0 w-full">
                 <h3 className="font-extrabold text-slate-800 text-[11px] leading-tight break-words whitespace-normal overflow-hidden line-clamp-2 text-ellipsis group-hover:text-violet-700 transition-colors w-full">
                   {product.name}
                 </h3>
               </div>
 
-              {/* Pied : prix, stock et bouton + */}
               <div className="w-full px-2 pb-2 flex items-center justify-between gap-1 mt-auto">
                 <div className="min-w-0">
                   <span className="text-[12px] font-black bg-gradient-to-r from-violet-700 to-fuchsia-600 bg-clip-text text-transparent truncate block leading-none">
@@ -988,7 +884,7 @@ export default function POS({ userProfile }: POSProps) {
               </div>
 
               {product.stock <= 0 && (
-                <div className="absolute inset-0 bg-white/70 backdrop-blur-[1px] rounded-2xl flex items-center justify-center p-1 text-center">
+                <div className="absolute inset-0 bg-white/70 backdrop-blur-[1px] rounded-xl flex items-center justify-center p-1 text-center">
                   <div className="bg-rose-600 text-white px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider shadow-xs">
                     Rupture
                   </div>
@@ -1029,7 +925,6 @@ export default function POS({ userProfile }: POSProps) {
                 <UserCheck className="h-4.5 w-4.5 text-indigo-600" />
               </div>
               <select
-                ref={clientSelectRef}
                 value={selectedClient?.id || ''}
                 onChange={(e) => {
                   const client = clients.find(c => c.id === e.target.value);
@@ -1050,7 +945,7 @@ export default function POS({ userProfile }: POSProps) {
           </div>
 
           {/* Table representing the list of items in the Cart (Ticket columns) */}
-          <div className="flex-1 overflow-y-auto p-3 min-h-[180px] scrollbar-thin">
+          <div className="flex-1 overflow-y-auto p-3 min-h-0 scrollbar-thin">
             {cart.length === 0 ? (
               <div className="h-full py-16 flex flex-col items-center justify-center text-slate-350 gap-2">
                 <ShoppingCart className="w-12 h-12 opacity-30" />
@@ -1208,7 +1103,6 @@ export default function POS({ userProfile }: POSProps) {
                 <input
                   type="text"
                   inputMode="decimal"
-                  ref={discountInputRef}
                   value={discountInput}
                   onFocus={(e) => {
                     setIsDiscountFocused(true);
@@ -1235,20 +1129,6 @@ export default function POS({ userProfile }: POSProps) {
               </div>
               {/* Presets remise super compacts */}
               <div className="flex gap-1 mt-1 justify-end">
-                <button 
-                  type="button"
-                  onClick={() => { const v = Math.round((subtotal + tvaAmount) * 0.05 * 1000) / 1000; setDiscount(v); setDiscountInput(v.toFixed(3)); }}
-                  className="text-[7px] font-bold bg-white hover:bg-amber-100 text-amber-850 px-1 py-0.5 rounded border border-amber-250 cursor-pointer"
-                >
-                  -5%
-                </button>
-                <button 
-                  type="button"
-                  onClick={() => { const v = Math.round((subtotal + tvaAmount) * 0.10 * 1000) / 1000; setDiscount(v); setDiscountInput(v.toFixed(3)); }}
-                  className="text-[7px] font-bold bg-white hover:bg-amber-100 text-amber-850 px-1 py-0.5 rounded border border-amber-250 cursor-pointer"
-                >
-                  -10%
-                </button>
                 <button 
                   type="button"
                   onClick={() => { setDiscount(0); setDiscountInput('0'); }}
@@ -1410,37 +1290,19 @@ export default function POS({ userProfile }: POSProps) {
                   </div>
                 </div>
 
-                {/* ACTIONS PRINCIPALES : Encaisser + Vente à crédit */}
-                <div className="grid grid-cols-3 gap-2">
+                {/* MAIN ACTIONS (Emerald button) */}
+                <div>
                   <button
                     onClick={validateSale}
                     disabled={cart.length === 0 || isProcessing}
-                    className="col-span-2 py-2.5 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-fuchsia-950/30 active:scale-[0.98] disabled:opacity-40 disabled:scale-100 disabled:shadow-none flex items-center justify-center gap-1.5 cursor-pointer"
+                    className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-emerald-950/30 active:scale-[0.98] disabled:opacity-40 disabled:scale-100 disabled:shadow-none flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     {isProcessing ? 'Traitement...' : (
                       <>
-                        <CheckCircle className="w-4 h-4 shrink-0" />
-                        Encaisser <span className="hidden xl:inline opacity-70 normal-case font-bold">(Entrée)</span>
+                        <CheckCircle className="w-4 h-4 shrink-0 animate-pulse" />
+                        Encaisser & Valider
                       </>
                     )}
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (!selectedClient) {
-                        setError("Sélectionnez un client enregistré pour une vente à crédit.");
-                        setTimeout(() => setError(null), 3000);
-                        clientSelectRef.current?.focus();
-                        return;
-                      }
-                      setReceivedCash(0);
-                      setReceivedCashInput('');
-                      setTimeout(() => validateSaleRef.current(), 50);
-                    }}
-                    disabled={cart.length === 0 || isProcessing}
-                    className="py-2.5 bg-slate-800 hover:bg-slate-750 text-amber-400 border border-amber-500/30 font-black text-[10px] uppercase tracking-wider rounded-xl transition-all active:scale-[0.98] disabled:opacity-40 disabled:scale-100 flex items-center justify-center gap-1 cursor-pointer"
-                  >
-                    <Coins className="w-3.5 h-3.5 shrink-0" />
-                    À crédit
                   </button>
                 </div>
               </div>
@@ -1508,8 +1370,6 @@ export default function POS({ userProfile }: POSProps) {
           </div>
         </div>
       )}
-    </div>
-
     </div>
   );
 }
