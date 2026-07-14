@@ -375,6 +375,45 @@ function Sidebar({
   );
 }
 
+// Overlay bloquant affiché lorsque l'application est hors ligne :
+// grise toute la page, bloque clics / focus / clavier et affiche un message.
+function OfflineBlocker() {
+  useEffect(() => {
+    // Retire le focus de tout champ actif (zone de texte, bouton...)
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    // Bloque toute saisie clavier (y compris Tab pour re-focaliser un champ)
+    const blockKeys = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    window.addEventListener('keydown', blockKeys, true);
+    return () => {
+      window.removeEventListener('keydown', blockKeys, true);
+    };
+  }, []);
+
+  return (
+    <div
+      className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 cursor-not-allowed select-none"
+      onMouseDown={(e) => e.preventDefault()}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-sm w-full text-center">
+        <div className="mx-auto w-16 h-16 rounded-full bg-gradient-to-tr from-indigo-600 to-cyan-500 flex items-center justify-center mb-4 shadow-md shadow-indigo-600/20">
+          <WifiOff className="w-8 h-8 text-white" />
+        </div>
+        <h2 className="text-xl font-black font-display text-slate-800 mb-2">Connexion Internet requise</h2>
+        <p className="text-slate-500 text-sm leading-relaxed">
+          Vérifiez votre connexion Internet.<br />
+          Aucune action n'est possible tant que vous êtes hors ligne.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -622,7 +661,12 @@ export default function App() {
   }
 
   if (!user) {
-    return <Login />;
+    return (
+      <>
+        <Login />
+        {!isOnline && <OfflineBlocker />}
+      </>
+    );
   }
 
   return (
@@ -780,6 +824,8 @@ export default function App() {
               </Routes>
             </div>
           </main>
+
+          {!isOnline && <OfflineBlocker />}
         </div>
       </Router>
     </ErrorBoundary>
