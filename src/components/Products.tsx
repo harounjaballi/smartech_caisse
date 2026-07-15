@@ -233,47 +233,16 @@ export default function Products({ userProfile }: ProductsProps) {
           });
         }
 
-        // Add supply adjustment record if stock increased
-        if (newStock > oldStock) {
-          const qtyAdded = newStock - oldStock;
-          const expenseAmount = qtyAdded * formData.buyPrice;
-          await addDoc(collection(db, 'supplies'), {
+        // La modification du stock via l'édition d'un produit ne génère AUCUNE dépense.
+        // Seuls la création d'un produit (stock initial) et l'approvisionnement
+        // créent des enregistrements dans 'supplies' (comptés comme dépenses).
+        if (newStock !== oldStock) {
+          console.log(`[DEBUG LOG] Produit "Modifié" (Stock ${newStock > oldStock ? 'Augmenté' : 'Diminué'} sans dépense) de ${editingProduct.name}:`, {
             productId: editingProduct.id,
             productName: formData.name,
-            quantity: qtyAdded,
-            buyPrice: formData.buyPrice,
-            totalCost: expenseAmount,
-            date: new Date(),
-            ownerId,
-            userId: userProfile?.uid || ownerId
-          });
-          console.log(`[DEBUG LOG] Produit "Modifié" (Stock Augmenté) de ${editingProduct.name}:`, {
-            productId: editingProduct.id,
-            productName: formData.name,
-            quantity: qtyAdded,
-            buyPrice: formData.buyPrice,
-            calculatedExpense: expenseAmount
-          });
-        } else if (newStock < oldStock) {
-          // Add negative supply adjustment record if stock decreased
-          const qtyRemoved = oldStock - newStock;
-          const expenseAmount = -qtyRemoved * formData.buyPrice;
-          await addDoc(collection(db, 'supplies'), {
-            productId: editingProduct.id,
-            productName: formData.name,
-            quantity: -qtyRemoved,
-            buyPrice: formData.buyPrice,
-            totalCost: expenseAmount,
-            date: new Date(),
-            ownerId,
-            userId: userProfile?.uid || ownerId
-          });
-          console.log(`[DEBUG LOG] Produit "Modifié" (Stock Diminué) de ${editingProduct.name}:`, {
-            productId: editingProduct.id,
-            productName: formData.name,
-            quantity: -qtyRemoved,
-            buyPrice: formData.buyPrice,
-            calculatedExpense: expenseAmount
+            oldStock,
+            newStock,
+            buyPrice: formData.buyPrice
           });
         } else {
           console.log(`[DEBUG LOG] Produit "Modifié" (Stock inchangé) de ${editingProduct.name}:`, {
