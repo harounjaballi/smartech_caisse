@@ -1955,7 +1955,6 @@ export default function Dashboard({ userProfile }: DashboardProps) {
                         <th className="px-6 py-3 text-center">Quantité Ajoutée</th>
                         <th className="px-6 py-3 text-right">Prix d'Achat unitaire</th>
                         <th className="px-6 py-3 text-right">Coût Total</th>
-                        <th className="px-6 py-3 text-center">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -1984,30 +1983,6 @@ export default function Dashboard({ userProfile }: DashboardProps) {
                             </td>
                             <td className="px-6 py-3.5 text-right font-black text-amber-700 font-mono">
                               {(sup.totalCost || 0).toFixed(3)} {currency}
-                            </td>
-                            <td className="px-6 py-3.5 whitespace-nowrap text-center">
-                              <div className="inline-flex items-center gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setEditingSupply(sup);
-                                    setEditingSupplyQty(String(sup.quantity || ''));
-                                    setEditingSupplyPrice(String(sup.buyPrice || ''));
-                                  }}
-                                  className="p-1.5 hover:bg-amber-50 hover:text-amber-700 text-slate-400 rounded-lg cursor-pointer transition-colors"
-                                  title="Modifier"
-                                >
-                                  <Edit2 className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteSupply(sup)}
-                                  className="p-1.5 hover:bg-red-50 hover:text-red-700 text-slate-400 rounded-lg cursor-pointer transition-colors"
-                                  title="Supprimer"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
                             </td>
                           </tr>
                         );
