@@ -4,7 +4,7 @@ import { EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 import { db, auth } from '../firebase';
 import { StoreSettings, UserProfile } from '../types';
 import { handleFirestoreError, OperationType, hasMenuAccess } from '../App';
-import { Edit2, X, Settings as SettingsIcon, CheckCircle2, Store, Save, Download, Trash2, Database, AlertTriangle, Calendar, Eye, FileText, KeyRound, Lock, Mail, ShieldCheck } from 'lucide-react';
+import { Edit2, X, Settings as SettingsIcon, CheckCircle2, Store, Save, Download, Trash2, Database, AlertTriangle, Calendar, Eye, FileText, KeyRound, Lock, ShieldCheck } from 'lucide-react';
 import { cn } from '../lib/utils';
 import * as XLSX from 'xlsx';
 
@@ -17,25 +17,12 @@ interface SettingsProps {
 function SecurityCodeCard({ userProfile }: { userProfile: UserProfile | null }) {
   const [newCode, setNewCode] = useState('');
   const [confirmCode, setConfirmCode] = useState('');
-  const [method, setMethod] = useState<'password' | 'email'>('password');
   const [password, setPassword] = useState('');
-  const [otp, setOtp] = useState('');
-  const [otpSent, setOtpSent] = useState(false);
-  const [maskedEmail, setMaskedEmail] = useState('');
-  const [sendingOtp, setSendingOtp] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
   const onlyDigits = (v: string, max: number) => v.replace(/\D/g, '').slice(0, max);
-
-  const resetVerification = () => {
-    setPassword('');
-    setOtp('');
-    setOtpSent(false);
-    setMaskedEmail('');
-    setError('');
-  };
 
   const validateCodes = (): boolean => {
     setError('');
@@ -50,69 +37,31 @@ function SecurityCodeCard({ userProfile }: { userProfile: UserProfile | null }) 
     return true;
   };
 
-  const handleSendOtp = async () => {
-    if (!validateCodes()) return;
-    if (!userProfile?.uid) return;
-    setSendingOtp(true);
-    setError('');
-    try {
-      const response = await fetch('/api/otp/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ uid: userProfile.uid })
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Impossible d'envoyer le code par email.");
-      setOtpSent(true);
-      setMaskedEmail(data.email || '');
-    } catch (err: any) {
-      setError(err.message || "Erreur lors de l'envoi du code par email.");
-    } finally {
-      setSendingOtp(false);
-    }
-  };
-
   const handleChangeCode = async () => {
     if (!validateCodes()) return;
     if (!userProfile?.uid) return;
+    if (!password) {
+      setError('Veuillez saisir votre mot de passe.');
+      return;
+    }
     setSaving(true);
     setError('');
     try {
-      if (method === 'password') {
-        if (!password) {
-          setError('Veuillez saisir votre mot de passe.');
-          setSaving(false);
-          return;
+      const currentUser = auth.currentUser;
+      if (!currentUser || !currentUser.email) {
+        throw new Error('Session invalide. Veuillez vous reconnecter.');
+      }
+      try {
+        const credential = EmailAuthProvider.credential(currentUser.email, password);
+        await reauthenticateWithCredential(currentUser, credential);
+      } catch (authErr: any) {
+        if (authErr?.code === 'auth/wrong-password' || authErr?.code === 'auth/invalid-credential' || authErr?.code === 'auth/invalid-login-credentials') {
+          throw new Error('Mot de passe incorrect.');
         }
-        const currentUser = auth.currentUser;
-        if (!currentUser || !currentUser.email) {
-          throw new Error('Session invalide. Veuillez vous reconnecter.');
+        if (authErr?.code === 'auth/too-many-requests') {
+          throw new Error('Trop de tentatives. Veuillez réessayer plus tard.');
         }
-        try {
-          const credential = EmailAuthProvider.credential(currentUser.email, password);
-          await reauthenticateWithCredential(currentUser, credential);
-        } catch (authErr: any) {
-          if (authErr?.code === 'auth/wrong-password' || authErr?.code === 'auth/invalid-credential' || authErr?.code === 'auth/invalid-login-credentials') {
-            throw new Error('Mot de passe incorrect.');
-          }
-          if (authErr?.code === 'auth/too-many-requests') {
-            throw new Error('Trop de tentatives. Veuillez réessayer plus tard.');
-          }
-          throw new Error("Vérification du mot de passe impossible. Si vous êtes connecté via Google, utilisez la vérification par email.");
-        }
-      } else {
-        if (!/^\d{6}$/.test(otp)) {
-          setError('Veuillez saisir le code à 6 chiffres reçu par email.');
-          setSaving(false);
-          return;
-        }
-        const response = await fetch('/api/otp/verify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ uid: userProfile.uid, otp })
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'Code de vérification invalide.');
+        throw new Error('Vérification du mot de passe impossible. Veuillez vous reconnecter et réessayer.');
       }
 
       // Vérification réussie : mise à jour du code de sécurité (autorisé par les règles Firestore : auto-modification)
@@ -121,7 +70,7 @@ function SecurityCodeCard({ userProfile }: { userProfile: UserProfile | null }) 
       setSuccessMsg('Votre code de sécurité a été modifié avec succès !');
       setNewCode('');
       setConfirmCode('');
-      resetVerification();
+      setPassword('');
       setTimeout(() => setSuccessMsg(''), 5000);
     } catch (err: any) {
       setError(err.message || 'Une erreur est survenue lors du changement de code.');
@@ -174,93 +123,21 @@ function SecurityCodeCard({ userProfile }: { userProfile: UserProfile | null }) 
           </div>
         </div>
 
-        {/* Choix de la méthode de vérification */}
         <div className="space-y-1.5">
-          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block font-bold">Méthode de vérification</label>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => { setMethod('password'); resetVerification(); }}
-              className={cn(
-                "flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold border transition-all",
-                method === 'password'
-                  ? "bg-indigo-50 border-indigo-300 text-indigo-700"
-                  : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
-              )}
-            >
-              <Lock className="w-3.5 h-3.5" />
-              Mot de passe
-            </button>
-            <button
-              type="button"
-              onClick={() => { setMethod('email'); resetVerification(); }}
-              className={cn(
-                "flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold border transition-all",
-                method === 'email'
-                  ? "bg-indigo-50 border-indigo-300 text-indigo-700"
-                  : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
-              )}
-            >
-              <Mail className="w-3.5 h-3.5" />
-              Code par email
-            </button>
-          </div>
-        </div>
-
-        {method === 'password' ? (
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block font-bold">Votre mot de passe</label>
+          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block font-bold">Votre mot de passe</label>
+          <div className="relative">
+            <Lock className="w-3.5 h-3.5 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
               type="password"
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold transition-all outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500"
+              className="w-full pl-9 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold transition-all outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500"
               placeholder="Mot de passe de votre compte"
             />
           </div>
-        ) : (
-          <div className="space-y-3">
-            {!otpSent ? (
-              <button
-                type="button"
-                onClick={handleSendOtp}
-                disabled={sendingOtp}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-100 text-slate-700 text-xs font-bold rounded-xl hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed uppercase tracking-wider"
-              >
-                <Mail className="w-3.5 h-3.5" />
-                {sendingOtp ? 'Envoi en cours...' : 'Recevoir un code par email'}
-              </button>
-            ) : (
-              <>
-                <p className="text-[11px] text-slate-500 font-medium">
-                  Un code à 6 chiffres a été envoyé à <span className="font-bold text-slate-700">{maskedEmail}</span> (valide 5 minutes).
-                </p>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block font-bold">Code reçu par email</label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    maxLength={6}
-                    value={otp}
-                    onChange={(e) => setOtp(onlyDigits(e.target.value, 6))}
-                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold transition-all outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 tracking-[0.5em] text-center"
-                    placeholder="••••••"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={handleSendOtp}
-                  disabled={sendingOtp}
-                  className="text-[11px] text-indigo-600 font-bold hover:underline disabled:opacity-50"
-                >
-                  {sendingOtp ? 'Envoi en cours...' : 'Renvoyer un code'}
-                </button>
-              </>
-            )}
-          </div>
-        )}
+          <p className="text-[10px] text-slate-400 font-medium">Votre mot de passe est requis pour confirmer le changement de code.</p>
+        </div>
 
         {error && (
           <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-100 rounded-xl">
@@ -279,7 +156,7 @@ function SecurityCodeCard({ userProfile }: { userProfile: UserProfile | null }) 
         <button
           type="button"
           onClick={handleChangeCode}
-          disabled={saving || newCode.length !== 4 || confirmCode.length !== 4 || (method === 'email' && !otpSent)}
+          disabled={saving || newCode.length !== 4 || confirmCode.length !== 4 || !password}
           className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 text-white text-xs font-bold rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed uppercase tracking-wider"
         >
           <ShieldCheck className="w-4 h-4" />
