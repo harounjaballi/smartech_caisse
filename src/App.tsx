@@ -220,6 +220,9 @@ function Sidebar({
   const navItems = allNavItems.filter((item) => {
     if (item.superAdminOnly) return userProfile?.email === SUPER_ADMIN_EMAIL;
     if (item.adminOnly && userProfile?.role !== 'admin') return false;
+    // "Paramètres" est toujours accessible : chaque utilisateur peut y changer
+    // son code de sécurité (les paramètres du magasin restent soumis à la permission).
+    if (item.id === 'settings') return true;
     return hasMenuAccess(userProfile, item.id);
   });
 
@@ -819,7 +822,8 @@ export default function App() {
                 <Route path="/notes" element={hasMenuAccess(userProfile, 'notes') ? <Notes userProfile={userProfile} /> : <Navigate to="/" replace />} />
                 <Route path="/users" element={userProfile?.role === 'admin' && hasMenuAccess(userProfile, 'users') ? <UsersManager userProfile={userProfile} /> : <Navigate to="/" replace />} />
                 <Route path="/statistics" element={userProfile?.email === SUPER_ADMIN_EMAIL ? <Statistics userProfile={userProfile} /> : <Navigate to="/" replace />} />
-                <Route path="/settings" element={hasMenuAccess(userProfile, 'settings') ? <Settings userProfile={userProfile} /> : <Navigate to="/" replace />} />
+                {/* /settings accessible à tous : le composant Settings n'affiche que la carte "Mon code de sécurité" aux utilisateurs sans permission */}
+                <Route path="/settings" element={<Settings userProfile={userProfile} />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </div>
