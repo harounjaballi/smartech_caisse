@@ -1,14 +1,293 @@
 import React, { useState, useEffect } from 'react';
-import { doc, onSnapshot, setDoc, collection, getDocs, query, where, deleteDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, updateDoc, collection, getDocs, query, where, deleteDoc } from 'firebase/firestore';
+import { EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 import { db, auth } from '../firebase';
 import { StoreSettings, UserProfile } from '../types';
 import { handleFirestoreError, OperationType, hasMenuAccess } from '../App';
-import { Edit2, X, Settings as SettingsIcon, CheckCircle2, Store, Save, Download, Trash2, Database, AlertTriangle, Calendar, Eye, FileText } from 'lucide-react';
+import { Edit2, X, Settings as SettingsIcon, CheckCircle2, Store, Save, Download, Trash2, Database, AlertTriangle, Calendar, Eye, FileText, KeyRound, Lock, Mail, ShieldCheck } from 'lucide-react';
 import { cn } from '../lib/utils';
 import * as XLSX from 'xlsx';
 
 interface SettingsProps {
   userProfile: UserProfile | null;
+}
+
+// ── Carte "Mon code de sécurité" : chaque utilisateur peut changer son propre code à 4 chiffres.
+// Vérification obligatoire avant le changement : mot de passe du compte OU code reçu par email.
+function SecurityCodeCard({ userProfile }: { userProfile: UserProfile | null }) {
+  const [newCode, setNewCode] = useState('');
+  const [confirmCode, setConfirmCode] = useState('');
+  const [method, setMethod] = useState<'password' | 'email'>('password');
+  const [password, setPassword] = useState('');
+  const [otp, setOtp] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  const [maskedEmail, setMaskedEmail] = useState('');
+  const [sendingOtp, setSendingOtp] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
+
+  const onlyDigits = (v: string, max: number) => v.replace(/\D/g, '').slice(0, max);
+
+  const resetVerification = () => {
+    setPassword('');
+    setOtp('');
+    setOtpSent(false);
+    setMaskedEmail('');
+    setError('');
+  };
+
+  const validateCodes = (): boolean => {
+    setError('');
+    if (!/^\d{4}$/.test(newCode)) {
+      setError('Le nouveau code doit contenir exactement 4 chiffres.');
+      return false;
+    }
+    if (newCode !== confirmCode) {
+      setError('La confirmation ne correspond pas au nouveau code.');
+      return false;
+    }
+    return true;
+  };
+
+  const handleSendOtp = async () => {
+    if (!validateCodes()) return;
+    if (!userProfile?.uid) return;
+    setSendingOtp(true);
+    setError('');
+    try {
+      const response = await fetch('/api/otp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid: userProfile.uid })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Impossible d'envoyer le code par email.");
+      setOtpSent(true);
+      setMaskedEmail(data.email || '');
+    } catch (err: any) {
+      setError(err.message || "Erreur lors de l'envoi du code par email.");
+    } finally {
+      setSendingOtp(false);
+    }
+  };
+
+  const handleChangeCode = async () => {
+    if (!validateCodes()) return;
+    if (!userProfile?.uid) return;
+    setSaving(true);
+    setError('');
+    try {
+      if (method === 'password') {
+        if (!password) {
+          setError('Veuillez saisir votre mot de passe.');
+          setSaving(false);
+          return;
+        }
+        const currentUser = auth.currentUser;
+        if (!currentUser || !currentUser.email) {
+          throw new Error('Session invalide. Veuillez vous reconnecter.');
+        }
+        try {
+          const credential = EmailAuthProvider.credential(currentUser.email, password);
+          await reauthenticateWithCredential(currentUser, credential);
+        } catch (authErr: any) {
+          if (authErr?.code === 'auth/wrong-password' || authErr?.code === 'auth/invalid-credential' || authErr?.code === 'auth/invalid-login-credentials') {
+            throw new Error('Mot de passe incorrect.');
+          }
+          if (authErr?.code === 'auth/too-many-requests') {
+            throw new Error('Trop de tentatives. Veuillez réessayer plus tard.');
+          }
+          throw new Error("Vérification du mot de passe impossible. Si vous êtes connecté via Google, utilisez la vérification par email.");
+        }
+      } else {
+        if (!/^\d{6}$/.test(otp)) {
+          setError('Veuillez saisir le code à 6 chiffres reçu par email.');
+          setSaving(false);
+          return;
+        }
+        const response = await fetch('/api/otp/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uid: userProfile.uid, otp })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Code de vérification invalide.');
+      }
+
+      // Vérification réussie : mise à jour du code de sécurité (autorisé par les règles Firestore : auto-modification)
+      await updateDoc(doc(db, 'users', userProfile.uid), { securityCode: newCode });
+
+      setSuccessMsg('Votre code de sécurité a été modifié avec succès !');
+      setNewCode('');
+      setConfirmCode('');
+      resetVerification();
+      setTimeout(() => setSuccessMsg(''), 5000);
+    } catch (err: any) {
+      setError(err.message || 'Une erreur est survenue lors du changement de code.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const codeInputClass = "w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold transition-all outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 tracking-[0.5em] text-center";
+
+  return (
+    <div className="bg-white rounded-3xl border border-slate-100 shadow-xs overflow-hidden premium-shadow">
+      <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex items-center gap-3">
+        <div className="p-2 bg-rose-50 text-rose-600 rounded-xl">
+          <KeyRound className="w-5 h-5" />
+        </div>
+        <div>
+          <h2 className="font-bold text-slate-800 text-sm">Mon Code de Sécurité</h2>
+          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Code à 4 chiffres pour les actions protégées</p>
+        </div>
+      </div>
+
+      <div className="p-6 space-y-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block font-bold">Nouveau code (4 chiffres)</label>
+            <input
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={4}
+              value={newCode}
+              onChange={(e) => setNewCode(onlyDigits(e.target.value, 4))}
+              className={codeInputClass}
+              placeholder="••••"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block font-bold">Confirmer le nouveau code</label>
+            <input
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={4}
+              value={confirmCode}
+              onChange={(e) => setConfirmCode(onlyDigits(e.target.value, 4))}
+              className={codeInputClass}
+              placeholder="••••"
+            />
+          </div>
+        </div>
+
+        {/* Choix de la méthode de vérification */}
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block font-bold">Méthode de vérification</label>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => { setMethod('password'); resetVerification(); }}
+              className={cn(
+                "flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold border transition-all",
+                method === 'password'
+                  ? "bg-indigo-50 border-indigo-300 text-indigo-700"
+                  : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
+              )}
+            >
+              <Lock className="w-3.5 h-3.5" />
+              Mot de passe
+            </button>
+            <button
+              type="button"
+              onClick={() => { setMethod('email'); resetVerification(); }}
+              className={cn(
+                "flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold border transition-all",
+                method === 'email'
+                  ? "bg-indigo-50 border-indigo-300 text-indigo-700"
+                  : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
+              )}
+            >
+              <Mail className="w-3.5 h-3.5" />
+              Code par email
+            </button>
+          </div>
+        </div>
+
+        {method === 'password' ? (
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block font-bold">Votre mot de passe</label>
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold transition-all outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500"
+              placeholder="Mot de passe de votre compte"
+            />
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {!otpSent ? (
+              <button
+                type="button"
+                onClick={handleSendOtp}
+                disabled={sendingOtp}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-100 text-slate-700 text-xs font-bold rounded-xl hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed uppercase tracking-wider"
+              >
+                <Mail className="w-3.5 h-3.5" />
+                {sendingOtp ? 'Envoi en cours...' : 'Recevoir un code par email'}
+              </button>
+            ) : (
+              <>
+                <p className="text-[11px] text-slate-500 font-medium">
+                  Un code à 6 chiffres a été envoyé à <span className="font-bold text-slate-700">{maskedEmail}</span> (valide 5 minutes).
+                </p>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block font-bold">Code reçu par email</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    value={otp}
+                    onChange={(e) => setOtp(onlyDigits(e.target.value, 6))}
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold transition-all outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 tracking-[0.5em] text-center"
+                    placeholder="••••••"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSendOtp}
+                  disabled={sendingOtp}
+                  className="text-[11px] text-indigo-600 font-bold hover:underline disabled:opacity-50"
+                >
+                  {sendingOtp ? 'Envoi en cours...' : 'Renvoyer un code'}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {error && (
+          <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-100 rounded-xl">
+            <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+            <p className="text-[11px] text-red-600 font-semibold">{error}</p>
+          </div>
+        )}
+
+        {successMsg && (
+          <div className="flex items-start gap-2 p-3 bg-emerald-50 border border-emerald-100 rounded-xl">
+            <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+            <p className="text-[11px] text-emerald-600 font-semibold">{successMsg}</p>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={handleChangeCode}
+          disabled={saving || newCode.length !== 4 || confirmCode.length !== 4 || (method === 'email' && !otpSent)}
+          className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 text-white text-xs font-bold rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed uppercase tracking-wider"
+        >
+          <ShieldCheck className="w-4 h-4" />
+          {saving ? 'Vérification...' : 'Changer mon code'}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export default function Settings({ userProfile }: SettingsProps) {
@@ -19,15 +298,22 @@ export default function Settings({ userProfile }: SettingsProps) {
   const ownerId = userProfile?.ownerId || userProfile?.uid || 'no_user_auth';
 
   if (userProfile && !hasMenuAccess(userProfile, 'settings')) {
+    // L'utilisateur n'a pas accès aux paramètres du magasin,
+    // mais il peut toujours changer son propre code de sécurité.
     return (
-      <div className="max-w-4xl mx-auto mt-8 p-8 bg-white rounded-2xl shadow-sm border border-red-100 flex flex-col items-center text-center animate-in fade-in zoom-in-95 duration-200">
-        <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-4">
-          <AlertTriangle className="w-8 h-8" />
+      <div className="space-y-6 max-w-4xl mx-auto">
+        <div>
+          <h1 className="text-2xl font-black text-slate-800 tracking-tight flex items-center gap-2">
+            <SettingsIcon className="w-7 h-7 text-indigo-600 fill-indigo-100/40" />
+            Paramètres
+          </h1>
+          <p className="text-xs text-slate-500 font-medium">
+            Gérez votre code de sécurité personnel. Les paramètres du magasin sont réservés aux utilisateurs autorisés.
+          </p>
         </div>
-        <h2 className="text-xl font-bold text-gray-900">Accès Refusé</h2>
-        <p className="text-sm text-gray-400 mt-2 max-w-sm">
-          Vous n'avez pas la permission d'accéder aux paramètres de la boutique. Veuillez contacter un administrateur pour modifier vos droits.
-        </p>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+          <SecurityCodeCard userProfile={userProfile} />
+        </div>
       </div>
     );
   }
@@ -529,6 +815,9 @@ export default function Settings({ userProfile }: SettingsProps) {
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+          {/* Card 0: Mon code de sécurité (visible par tous les utilisateurs) */}
+          <SecurityCodeCard userProfile={userProfile} />
+
           {/* Card 1: Informations Générales de la Boutique */}
           <div className="bg-white rounded-3xl border border-slate-100 shadow-xs overflow-hidden premium-shadow">
             <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex items-center gap-3">
