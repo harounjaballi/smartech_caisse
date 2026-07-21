@@ -205,6 +205,12 @@ export default function Products({ userProfile }: ProductsProps) {
     e.preventDefault();
     setErrorMsg(null);
 
+    // Hors-ligne : toute écriture est bloquée pour éviter les incohérences de stock.
+    if (!navigator.onLine) {
+      setErrorMsg("Connexion Internet requise. Aucune modification n'est possible hors ligne.");
+      return;
+    }
+
     // Garde-fou : le prix de vente doit être supérieur ou égal au prix d'achat,
     // sinon chaque vente de ce produit génère un bénéfice négatif.
     if ((formData.sellPrice || 0) < (formData.buyPrice || 0)) {
@@ -342,6 +348,14 @@ export default function Products({ userProfile }: ProductsProps) {
   const handleReplenishSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!replenishProduct || !replenishQty) return;
+
+    // Hors-ligne : approvisionnement bloqué pour éviter les incohérences de stock.
+    if (!navigator.onLine) {
+      playBeep('error');
+      alert("Connexion Internet requise. L'approvisionnement est impossible hors ligne.");
+      return;
+    }
+
     try {
       const qty = parseInt(replenishQty) || 0;
       const price = parseFloat(replenishPrice) || 0;
