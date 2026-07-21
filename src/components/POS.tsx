@@ -555,7 +555,7 @@ export default function POS({ userProfile }: POSProps) {
         // Toute vente hors-ligne est désactivée : la décrémentation locale du stock
         // pouvait être écrasée à la synchronisation et corrompre les quantités.
         // On lève une erreur claire ; aucune donnée n'est écrite.
-        throw new Error('Connexion Internet requise pour valider une vente. Aucune vente n\'est enregistrée hors ligne.');
+        throw new Error('Vérifiez votre connexion Internet.');
       } else {
         // --- ONLINE SALE FLOW ---
         await runTransaction(db, async (transaction) => {
