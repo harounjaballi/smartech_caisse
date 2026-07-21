@@ -5,7 +5,6 @@ import { Product, Category, StoreSettings, UserProfile } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
 import { Plus, Search, Edit2, Trash2, X, AlertTriangle, Package, Tag, Barcode, Shield, Eye, EyeOff, AlertCircle, History, Loader2, ArrowDown, ArrowUp } from 'lucide-react';
 import { cn, decodeAzertyBarcode } from '../lib/utils';
-import { addPendingOperation } from '../lib/offlineManager';
 
 interface ProductsProps {
   userProfile: UserProfile | null;
@@ -28,6 +27,8 @@ export default function Products({ userProfile }: ProductsProps) {
   const [deletingCatId, setDeletingCatId] = useState<string | null>(null);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Empêche le double-clic sur "Enregistrer" / "Confirmer" (évite les ajouts en double)
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // States for security code modal (protects edit & delete)
   const [showSecurityModal, setShowSecurityModal] = useState(false);
@@ -205,9 +206,12 @@ export default function Products({ userProfile }: ProductsProps) {
     e.preventDefault();
     setErrorMsg(null);
 
+    // Empêche un second envoi tant que le premier n'est pas terminé (évite les doublons)
+    if (isSubmitting) return;
+
     // Hors-ligne : toute écriture est bloquée pour éviter les incohérences de stock.
     if (!navigator.onLine) {
-      setErrorMsg("Connexion Internet requise. Aucune modification n'est possible hors ligne.");
+      setErrorMsg("Vérifiez votre connexion Internet.");
       return;
     }
 
@@ -221,6 +225,7 @@ export default function Products({ userProfile }: ProductsProps) {
     }
 
     try {
+      setIsSubmitting(true);
       if (editingProduct) {
         const oldStock = editingProduct.stock || 0;
         const newStock = parseInt(formData.stock.toString()) || 0;
@@ -342,6 +347,8 @@ export default function Products({ userProfile }: ProductsProps) {
     } catch (error: any) {
       console.error("[ERROR] Failed to save product:", error);
       setErrorMsg(error?.message || String(error));
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -349,14 +356,18 @@ export default function Products({ userProfile }: ProductsProps) {
     e.preventDefault();
     if (!replenishProduct || !replenishQty) return;
 
+    // Empêche un second envoi tant que le premier n'est pas terminé (évite les doublons)
+    if (isSubmitting) return;
+
     // Hors-ligne : approvisionnement bloqué pour éviter les incohérences de stock.
     if (!navigator.onLine) {
       playBeep('error');
-      alert("Connexion Internet requise. L'approvisionnement est impossible hors ligne.");
+      alert("Vérifiez votre connexion Internet.");
       return;
     }
 
     try {
+      setIsSubmitting(true);
       const qty = parseInt(replenishQty) || 0;
       const price = parseFloat(replenishPrice) || 0;
       if (qty <= 0) return;
@@ -385,15 +396,7 @@ export default function Products({ userProfile }: ProductsProps) {
       });
 
       // Track in custom offline queue if offline to count pending operations
-      if (!navigator.onLine) {
-        addPendingOperation('REPLENISH_STOCK', {
-          productId: replenishProduct.id,
-          qty,
-          price,
-          expenseAmount,
-          productName: replenishProduct.name
-        });
-      }
+      // (Bloc conservé sans effet : l'approvisionnement hors-ligne est désormais bloqué en amont.)
 
       console.log(`[DEBUG LOG] Approvisionnement effectué pour "${replenishProduct.name}":`, {
         productId: replenishProduct.id,
@@ -410,6 +413,8 @@ export default function Products({ userProfile }: ProductsProps) {
     } catch (error: any) {
       console.error("[ERROR] Failed to replenish product stock:", error);
       playBeep('error');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -620,7 +625,16 @@ export default function Products({ userProfile }: ProductsProps) {
   const handleQuickCategoryAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCategoryName.trim()) return;
-    
+
+    // Empêche un second envoi tant que le premier n'est pas terminé (évite les doublons)
+    if (isSubmitting) return;
+
+    // Hors-ligne : ajout bloqué.
+    if (!navigator.onLine) {
+      alert("Vérifiez votre connexion Internet.");
+      return;
+    }
+
     const exists = categories.some(c => c.name.toLowerCase() === newCategoryName.trim().toLowerCase());
     if (exists) {
       alert('Cette catégorie existe déjà.');
@@ -628,6 +642,7 @@ export default function Products({ userProfile }: ProductsProps) {
     }
     
     try {
+      setIsSubmitting(true);
       await addDoc(collection(db, 'categories'), {
         name: newCategoryName.trim(),
         type: 'autre',
@@ -637,6 +652,8 @@ export default function Products({ userProfile }: ProductsProps) {
       setNewCategoryName('');
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'categories');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -1090,9 +1107,10 @@ export default function Products({ userProfile }: ProductsProps) {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 px-4 py-2.5 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-600/15 cursor-pointer text-sm"
+                  disabled={isSubmitting}
+                  className="flex-1 px-4 py-2.5 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-600/15 cursor-pointer text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  {editingProduct ? 'Enregistrer' : 'Ajouter'}
+                  {isSubmitting ? 'Enregistrement…' : (editingProduct ? 'Enregistrer' : 'Ajouter')}
                 </button>
               </div>
             </form>
@@ -1422,9 +1440,10 @@ export default function Products({ userProfile }: ProductsProps) {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all shadow-md shadow-emerald-600/10 cursor-pointer active:scale-[0.98]"
+                  disabled={isSubmitting}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all shadow-md shadow-emerald-600/10 cursor-pointer active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  Confirmer
+                  {isSubmitting ? 'En cours…' : 'Confirmer'}
                 </button>
               </div>
             </form>
