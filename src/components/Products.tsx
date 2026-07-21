@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, orderBy, setDoc, getDocs, where } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, orderBy, setDoc, getDocs, where, getDocFromServer } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Product, Category, StoreSettings, UserProfile } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
@@ -202,18 +202,33 @@ export default function Products({ userProfile }: ProductsProps) {
     };
   }, [ownerId]);
 
+  // Vérifie une VRAIE connexion serveur avant toute écriture.
+  // getDocFromServer force une lecture réseau : hors-ligne (ou faux navigator.onLine),
+  // elle échoue → on n'écrit rien, donc aucune opération n'est mise en file ni rejouée.
+  const ensureOnline = async (timeoutMs = 8000): Promise<void> => {
+    let timer: ReturnType<typeof setTimeout>;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('OFFLINE')), timeoutMs);
+    });
+    try {
+      // Lecture serveur d'un doc léger (le compteur du propriétaire). Peu importe qu'il existe.
+      await Promise.race([
+        getDocFromServer(doc(db, 'counters', `invoices_${ownerId}`)),
+        timeout,
+      ]);
+    } catch {
+      throw new Error('OFFLINE');
+    } finally {
+      clearTimeout(timer!);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
 
     // Empêche un second envoi tant que le premier n'est pas terminé (évite les doublons)
     if (isSubmitting) return;
-
-    // Hors-ligne : toute écriture est bloquée pour éviter les incohérences de stock.
-    if (!navigator.onLine) {
-      setErrorMsg("Vérifiez votre connexion Internet.");
-      return;
-    }
 
     // Garde-fou : le prix de vente doit être supérieur ou égal au prix d'achat,
     // sinon chaque vente de ce produit génère un bénéfice négatif.
@@ -226,6 +241,10 @@ export default function Products({ userProfile }: ProductsProps) {
 
     try {
       setIsSubmitting(true);
+
+      // Vérifie une vraie connexion serveur AVANT d'écrire. Hors-ligne → aucune écriture.
+      await ensureOnline();
+
       if (editingProduct) {
         const oldStock = editingProduct.stock || 0;
         const newStock = parseInt(formData.stock.toString()) || 0;
@@ -345,8 +364,12 @@ export default function Products({ userProfile }: ProductsProps) {
       }
       closeModal();
     } catch (error: any) {
-      console.error("[ERROR] Failed to save product:", error);
-      setErrorMsg(error?.message || String(error));
+      if (error?.message === 'OFFLINE') {
+        setErrorMsg("Vérifiez votre connexion Internet.");
+      } else {
+        console.error("[ERROR] Failed to save product:", error);
+        setErrorMsg(error?.message || String(error));
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -359,15 +382,13 @@ export default function Products({ userProfile }: ProductsProps) {
     // Empêche un second envoi tant que le premier n'est pas terminé (évite les doublons)
     if (isSubmitting) return;
 
-    // Hors-ligne : approvisionnement bloqué pour éviter les incohérences de stock.
-    if (!navigator.onLine) {
-      playBeep('error');
-      alert("Vérifiez votre connexion Internet.");
-      return;
-    }
-
     try {
       setIsSubmitting(true);
+
+      // Vérifie une vraie connexion serveur AVANT d'écrire. Hors-ligne → aucune écriture.
+      // Le verrou isSubmitting reste actif pendant toute la vérification : les reclics sont ignorés.
+      await ensureOnline();
+
       const qty = parseInt(replenishQty) || 0;
       const price = parseFloat(replenishPrice) || 0;
       if (qty <= 0) return;
@@ -411,8 +432,13 @@ export default function Products({ userProfile }: ProductsProps) {
       setReplenishPrice('');
       playBeep('success');
     } catch (error: any) {
-      console.error("[ERROR] Failed to replenish product stock:", error);
       playBeep('error');
+      if (error?.message === 'OFFLINE') {
+        alert("Vérifiez votre connexion Internet.");
+      } else {
+        console.error("[ERROR] Failed to replenish product stock:", error);
+        alert("Échec de l'approvisionnement. Réessayez.");
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -629,12 +655,6 @@ export default function Products({ userProfile }: ProductsProps) {
     // Empêche un second envoi tant que le premier n'est pas terminé (évite les doublons)
     if (isSubmitting) return;
 
-    // Hors-ligne : ajout bloqué.
-    if (!navigator.onLine) {
-      alert("Vérifiez votre connexion Internet.");
-      return;
-    }
-
     const exists = categories.some(c => c.name.toLowerCase() === newCategoryName.trim().toLowerCase());
     if (exists) {
       alert('Cette catégorie existe déjà.');
@@ -643,6 +663,10 @@ export default function Products({ userProfile }: ProductsProps) {
     
     try {
       setIsSubmitting(true);
+
+      // Vérifie une vraie connexion serveur AVANT d'écrire.
+      await ensureOnline();
+
       await addDoc(collection(db, 'categories'), {
         name: newCategoryName.trim(),
         type: 'autre',
@@ -650,8 +674,12 @@ export default function Products({ userProfile }: ProductsProps) {
       });
       setFormData(prev => ({ ...prev, category: newCategoryName.trim() }));
       setNewCategoryName('');
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'categories');
+    } catch (error: any) {
+      if (error?.message === 'OFFLINE') {
+        alert("Vérifiez votre connexion Internet.");
+      } else {
+        handleFirestoreError(error, OperationType.CREATE, 'categories');
+      }
     } finally {
       setIsSubmitting(false);
     }
