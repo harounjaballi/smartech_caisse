@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { collection, onSnapshot, addDoc, updateDoc, doc, query, orderBy, serverTimestamp, runTransaction, getDoc, getDocs, where } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, doc, query, orderBy, serverTimestamp, runTransaction, getDoc, getDocs, where, getDocFromServer } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Product, Client, SaleItem, Sale, Invoice, Category, StoreSettings, UserProfile } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
@@ -545,18 +545,25 @@ export default function POS({ userProfile }: POSProps) {
     const effPaid = isCredit ? Math.min(Math.max(0, Math.round(creditPaid * 1000) / 1000), cartTotal) : paidAmount;
     const effDebt = isCredit ? Math.round((cartTotal - effPaid) * 1000) / 1000 : remainingDebt;
 
-    const isOffline = !navigator.onLine;
-
     try {
       let generatedInvoice: Invoice | null = null;
 
-      if (isOffline) {
-        // --- HORS-LIGNE : ÉCRITURE BLOQUÉE ---
-        // Toute vente hors-ligne est désactivée : la décrémentation locale du stock
-        // pouvait être écrasée à la synchronisation et corrompre les quantités.
-        // On lève une erreur claire ; aucune donnée n'est écrite.
+      // Vérifie une VRAIE connexion serveur avant la vente. getDocFromServer force une
+      // lecture réseau : hors-ligne (ou faux navigator.onLine), elle échoue → on bloque net,
+      // aucune écriture ni mise en file, donc pas de rejeu multiple à la reconnexion.
+      try {
+        const preflight = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('OFFLINE')), 8000)
+        );
+        await Promise.race([
+          getDocFromServer(doc(db, 'counters', `invoices_${ownerId}`)),
+          preflight,
+        ]);
+      } catch {
         throw new Error('Vérifiez votre connexion Internet.');
-      } else {
+      }
+
+      {
         // --- ONLINE SALE FLOW ---
         await runTransaction(db, async (transaction) => {
           console.log('Transaction started');
