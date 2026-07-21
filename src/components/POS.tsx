@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { collection, onSnapshot, addDoc, updateDoc, doc, query, orderBy, serverTimestamp, runTransaction, getDoc, setDoc, getDocs, where } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, doc, query, orderBy, serverTimestamp, runTransaction, getDoc, getDocs, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Product, Client, SaleItem, Sale, Invoice, Category, StoreSettings, UserProfile } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
@@ -8,7 +8,6 @@ import { Search, ShoppingCart, Trash2, Plus, Minus, User, CreditCard, CheckCircl
 import { cn, decodeAzertyBarcode } from '../lib/utils';
 import { format } from 'date-fns';
 import { PrintableTicket } from './PrintableTicket';
-import { addPendingOperation } from '../lib/offlineManager';
 
 interface POSProps {
   userProfile: UserProfile | null;
@@ -552,99 +551,11 @@ export default function POS({ userProfile }: POSProps) {
       let generatedInvoice: Invoice | null = null;
 
       if (isOffline) {
-        // --- OFFLINE SALE FLOW ---
-        console.log('[POS] Offline validation starting...');
-        const saleId = doc(collection(db, 'sales')).id;
-        const invoiceId = doc(collection(db, 'invoices')).id;
-
-        const year = new Date().getFullYear();
-        const randNum = Math.floor(1000 + Math.random() * 9000);
-        const invoiceNumber = `FAC-TEMP-${year}-${randNum}`;
-
-        // Validate products and stock locally
-        const stockUpdates: { ref: any, newStock: number }[] = [];
-        for (const item of cart) {
-          const product = products.find(p => p.id === item.productId);
-          if (!product) throw new Error(`Produit ${item.name} introuvable`);
-          const currentStock = product.stock || 0;
-          if (currentStock < item.quantity) {
-            throw new Error(`Stock insuffisant pour ${item.name} (Disponible: ${currentStock})`);
-          }
-          stockUpdates.push({
-            ref: doc(db, 'products', item.productId),
-            newStock: currentStock - item.quantity
-          });
-        }
-
-        // Validate client locally
-        let clientUpdate = null;
-        if (selectedClient && effDebt > 0) {
-          const currentDebt = selectedClient.debt || 0;
-          clientUpdate = {
-            ref: doc(db, 'clients', selectedClient.id),
-            newDebt: currentDebt + effDebt
-          };
-        }
-
-        // Apply local stock writes
-        for (const update of stockUpdates) {
-          await updateDoc(update.ref, { stock: update.newStock });
-        }
-
-        // Apply local client debt write
-        if (clientUpdate) {
-          await updateDoc(clientUpdate.ref, { debt: clientUpdate.newDebt });
-        }
-
-        // Save sale and invoice documents to Firestore local cache
-        const saleRef = doc(db, 'sales', saleId);
-        const invoiceRef = doc(db, 'invoices', invoiceId);
-
-        const saleData = {
-          id: saleId,
-          date: new Date().toISOString(), // Offline string date
-          clientId: selectedClient?.id || null,
-          clientCode: selectedClient?.code || '',
-          clientName: selectedClient?.name || 'Client de passage',
-          total: cartTotal,
-          paid: effPaid,
-          debt: effDebt,
-          tva: tvaAmount,
-          items: cart,
-          invoiceId: invoiceId,
-          ownerId
-        };
-
-        const invoiceData = {
-          id: invoiceId,
-          number: invoiceNumber,
-          saleId: saleId,
-          clientId: selectedClient?.id || null,
-          clientCode: selectedClient?.code || '',
-          clientName: selectedClient?.name || 'Client de passage',
-          clientPhone: selectedClient?.phone || '',
-          clientAddress: selectedClient?.address || '',
-          total: cartTotal,
-          paid: effPaid,
-          debt: effDebt,
-          tva: tvaAmount,
-          date: new Date().toISOString(),
-          items: cart,
-          ownerId
-        };
-
-        await setDoc(saleRef, saleData);
-        await setDoc(invoiceRef, invoiceData);
-
-        // Queue operation for official invoice number assignment when online
-        addPendingOperation('CREATE_SALE', {
-          sale: saleData,
-          invoice: invoiceData
-        });
-
-        generatedInvoice = invoiceData as any;
-        console.log('[POS] Offline sale recorded and queued successfully!');
-
+        // --- HORS-LIGNE : ÉCRITURE BLOQUÉE ---
+        // Toute vente hors-ligne est désactivée : la décrémentation locale du stock
+        // pouvait être écrasée à la synchronisation et corrompre les quantités.
+        // On lève une erreur claire ; aucune donnée n'est écrite.
+        throw new Error('Connexion Internet requise pour valider une vente. Aucune vente n\'est enregistrée hors ligne.');
       } else {
         // --- ONLINE SALE FLOW ---
         await runTransaction(db, async (transaction) => {
