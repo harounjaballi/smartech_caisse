@@ -3,7 +3,7 @@ import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, order
 import { db } from '../firebase';
 import { Product, Category, StoreSettings, UserProfile } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
-import { Plus, Search, Edit2, Trash2, X, AlertTriangle, Package, Tag, Barcode, Shield, Eye, EyeOff, AlertCircle } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, X, AlertTriangle, Package, Tag, Barcode, Shield, Eye, EyeOff, AlertCircle, History, Loader2, ArrowDown, ArrowUp } from 'lucide-react';
 import { cn, decodeAzertyBarcode } from '../lib/utils';
 import { addPendingOperation } from '../lib/offlineManager';
 
@@ -41,6 +41,13 @@ export default function Products({ userProfile }: ProductsProps) {
   const [replenishProduct, setReplenishProduct] = useState<Product | null>(null);
   const [replenishQty, setReplenishQty] = useState<string>('');
   const [replenishPrice, setReplenishPrice] = useState<string>('');
+
+  // States for stock history modal (diagnostic: entrées vs ventes vs stock affiché)
+  const [historyProduct, setHistoryProduct] = useState<Product | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyMovements, setHistoryMovements] = useState<{ type: 'in' | 'out'; qty: number; date: Date | null; label: string }[]>([]);
+  const [historyTotals, setHistoryTotals] = useState<{ totalIn: number; totalOut: number } | null>(null);
 
   const playBeep = (type: 'success' | 'error') => {
     try {
@@ -389,6 +396,76 @@ export default function Products({ userProfile }: ProductsProps) {
     } catch (error: any) {
       console.error("[ERROR] Failed to replenish product stock:", error);
       playBeep('error');
+    }
+  };
+
+  // Charge l'historique de stock d'un produit : entrées (supplies) et sorties (ventes),
+  // pour comparer le stock théorique (entrées - ventes) au stock affiché.
+  const openHistory = async (product: Product) => {
+    setHistoryProduct(product);
+    setHistoryLoading(true);
+    setHistoryError(null);
+    setHistoryMovements([]);
+    setHistoryTotals(null);
+
+    const toDate = (d: any): Date | null => {
+      if (!d) return null;
+      if (d instanceof Date) return d;
+      if (typeof d?.toDate === 'function') return d.toDate();
+      if (typeof d?.seconds === 'number') return new Date(d.seconds * 1000);
+      const parsed = new Date(d);
+      return isNaN(parsed.getTime()) ? null : parsed;
+    };
+
+    try {
+      const movements: { type: 'in' | 'out'; qty: number; date: Date | null; label: string }[] = [];
+      let totalIn = 0;
+      let totalOut = 0;
+
+      // Entrées : collection 'supplies' filtrée par productId
+      const suppliesSnap = await getDocs(query(
+        collection(db, 'supplies'),
+        where('ownerId', '==', ownerId),
+        where('productId', '==', product.id)
+      ));
+      suppliesSnap.forEach((d) => {
+        const s: any = d.data();
+        const qty = Number(s.quantity) || 0;
+        totalIn += qty;
+        movements.push({ type: 'in', qty, date: toDate(s.date), label: 'Entrée / appro.' });
+      });
+
+      // Sorties : parcourir 'sales', sommer les items de ce produit
+      const salesSnap = await getDocs(query(
+        collection(db, 'sales'),
+        where('ownerId', '==', ownerId)
+      ));
+      salesSnap.forEach((d) => {
+        const sale: any = d.data();
+        if (!Array.isArray(sale.items)) return;
+        for (const item of sale.items) {
+          if (item.productId === product.id) {
+            const qty = Number(item.quantity) || 0;
+            totalOut += qty;
+            movements.push({ type: 'out', qty, date: toDate(sale.date), label: 'Vente' });
+          }
+        }
+      });
+
+      // Tri chronologique (les mouvements sans date en dernier)
+      movements.sort((a, b) => {
+        const ta = a.date ? a.date.getTime() : Infinity;
+        const tb = b.date ? b.date.getTime() : Infinity;
+        return ta - tb;
+      });
+
+      setHistoryMovements(movements);
+      setHistoryTotals({ totalIn, totalOut });
+    } catch (error: any) {
+      console.error("[ERROR] Failed to load stock history:", error);
+      setHistoryError(error?.message || String(error));
+    } finally {
+      setHistoryLoading(false);
     }
   };
 
@@ -756,6 +833,14 @@ export default function Products({ userProfile }: ProductsProps) {
                         >
                           <Plus className="w-3.5 h-3.5" />
                           <span>+ Stock</span>
+                        </button>
+
+                        <button
+                          onClick={() => openHistory(product)}
+                          className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors border border-transparent"
+                          title="Historique du stock (entrées / ventes) pour ce produit"
+                        >
+                          <History className="w-4 h-4" />
                         </button>
 
                         <button
@@ -1329,6 +1414,136 @@ export default function Products({ userProfile }: ProductsProps) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Stock History Modal (diagnostic) */}
+      {historyProduct && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-2 sm:p-4 bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[calc(100vh-24px)] sm:max-h-[85vh] overflow-hidden border border-gray-100 animate-in zoom-in-95 duration-150">
+            <div className="flex-shrink-0 px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+              <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                <History className="w-5 h-5 text-indigo-600" />
+                Historique : {historyProduct.name}
+              </h2>
+              <button
+                onClick={() => setHistoryProduct(null)}
+                className="p-2 text-gray-400 hover:text-gray-600 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-4 touch-pan-y">
+              {historyLoading && (
+                <div className="flex flex-col items-center justify-center py-10 text-gray-400 gap-3">
+                  <Loader2 className="w-8 h-8 animate-spin" />
+                  <span className="text-sm font-medium">Chargement de l'historique…</span>
+                </div>
+              )}
+
+              {!historyLoading && historyError && (
+                <div className="p-3.5 bg-red-50 border border-red-100 rounded-xl flex items-start gap-2 text-red-700 text-xs font-medium">
+                  <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  <span>Erreur : {historyError}</span>
+                </div>
+              )}
+
+              {!historyLoading && !historyError && historyTotals && (() => {
+                const displayedStock = historyProduct.stock || 0;
+                const theoretical = historyTotals.totalIn - historyTotals.totalOut;
+                const gap = displayedStock - theoretical;
+                return (
+                  <>
+                    {/* Résumé */}
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-100 text-center">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Entrées</div>
+                        <div className="text-xl font-black text-emerald-700">{historyTotals.totalIn}</div>
+                      </div>
+                      <div className="p-3 rounded-xl bg-blue-50 border border-blue-100 text-center">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-blue-700">Ventes</div>
+                        <div className="text-xl font-black text-blue-700">{historyTotals.totalOut}</div>
+                      </div>
+                      <div className="p-3 rounded-xl bg-slate-50 border border-slate-100 text-center">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-600">Théorique</div>
+                        <div className="text-xl font-black text-slate-700">{theoretical}</div>
+                      </div>
+                    </div>
+
+                    {/* Verdict écart */}
+                    <div className={cn(
+                      "p-4 rounded-xl border flex items-start gap-3",
+                      gap === 0 ? "bg-emerald-50 border-emerald-150" : "bg-amber-50 border-amber-150"
+                    )}>
+                      {gap === 0
+                        ? <Package className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                        : <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />}
+                      <div className="text-xs leading-relaxed">
+                        <div className="font-bold text-gray-800">
+                          Stock affiché : {displayedStock} &nbsp;·&nbsp; Théorique : {theoretical} &nbsp;·&nbsp; Écart : {gap > 0 ? '+' : ''}{gap}
+                        </div>
+                        <div className="mt-1 text-gray-600">
+                          {gap === 0 && "Cohérent : le stock affiché correspond aux mouvements enregistrés."}
+                          {gap > 0 && `${gap} unité(s) en trop. Cause probable : édition manuelle du stock, ou vente hors-ligne dont la décrémentation a été écrasée à la synchronisation.`}
+                          {gap < 0 && `${-gap} unité(s) manquante(s). Cause probable : vente comptée en double, ou approvisionnement non enregistré.`}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Journal des mouvements */}
+                    <div>
+                      <div className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">
+                        Mouvements ({historyMovements.length})
+                      </div>
+                      {historyMovements.length === 0 ? (
+                        <div className="text-sm text-gray-400 italic py-4 text-center">
+                          Aucun mouvement enregistré. Le stock a probablement été saisi manuellement.
+                        </div>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {historyMovements.map((m, i) => (
+                            <div
+                              key={i}
+                              className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-50 border border-gray-100 text-xs"
+                            >
+                              <div className="flex items-center gap-2">
+                                {m.type === 'in'
+                                  ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" />
+                                  : <ArrowDown className="w-3.5 h-3.5 text-blue-600" />}
+                                <span className="font-medium text-gray-700">{m.label}</span>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <span className="text-gray-400">
+                                  {m.date ? m.date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'}
+                                </span>
+                                <span className={cn(
+                                  "font-black tabular-nums",
+                                  m.type === 'in' ? "text-emerald-600" : "text-blue-600"
+                                )}>
+                                  {m.type === 'in' ? '+' : '−'}{m.qty}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+
+            <div className="flex-shrink-0 border-t border-slate-100 p-4 bg-slate-50/70 flex justify-end pb-[calc(1rem+env(safe-area-inset-bottom,0px))]">
+              <button
+                type="button"
+                onClick={() => setHistoryProduct(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-650 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors cursor-pointer"
+              >
+                Fermer
+              </button>
+            </div>
           </div>
         </div>
       )}
