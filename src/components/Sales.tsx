@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { collection, onSnapshot, query, orderBy, limit, doc, getDoc, where, deleteDoc, setDoc, updateDoc, runTransaction, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Sale, Invoice, UserProfile } from '../types';
+import { Sale, Invoice, UserProfile, Product } from '../types';
 import { handleFirestoreError, OperationType } from '../App';
-import { Search, Calendar, User, ShoppingBag, Eye, X, Printer, Download, TrendingUp, Receipt, AlertCircle, CheckCircle2, Clock, Trash2, Shield, EyeOff } from 'lucide-react';
+import { Search, Calendar, User, ShoppingBag, Eye, X, Printer, Download, TrendingUp, Receipt, AlertCircle, CheckCircle2, Clock, Trash2, Shield, EyeOff, Package } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { cn } from '../lib/utils';
@@ -17,6 +17,8 @@ export default function Sales({ userProfile }: SalesProps) {
   const [sales, setSales] = useState<Sale[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [productCode, setProductCode] = useState('');
+  const [products, setProducts] = useState<Product[]>([]);
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
   const [filterStatus, setFilterStatus] = useState<'all' | 'paid' | 'partial'>('all');
 
@@ -255,6 +257,36 @@ export default function Sales({ userProfile }: SalesProps) {
     return unsubscribe;
   }, [userProfile]);
 
+  // Charge les produits pour permettre la recherche d'historique par code produit (code-barres / ID / nom)
+  useEffect(() => {
+    if (!userProfile) return;
+    const tenantOwnerId = userProfile.ownerId || userProfile.uid;
+    const q = query(collection(db, 'products'), where('ownerId', '==', tenantOwnerId));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setProducts(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Product)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'products');
+    });
+    return unsubscribe;
+  }, [userProfile]);
+
+  // Résout le code saisi (code-barres, ID ou nom) vers les identifiants de produits correspondants
+  const matchedProductIds = (() => {
+    const code = productCode.trim().toLowerCase();
+    if (!code) return null;
+    const ids = new Set<string>();
+    products.forEach(p => {
+      if (
+        (p.barcode && p.barcode.toLowerCase() === code) ||
+        p.id.toLowerCase() === code ||
+        p.name.toLowerCase().includes(code)
+      ) {
+        ids.add(p.id);
+      }
+    });
+    return ids;
+  })();
+
   const filteredSales = sales.filter(s => {
     const matchSearch =
       s.clientName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -263,7 +295,16 @@ export default function Sales({ userProfile }: SalesProps) {
       filterStatus === 'all' ||
       (filterStatus === 'paid' && s.debt === 0) ||
       (filterStatus === 'partial' && s.debt > 0);
-    return matchSearch && matchFilter;
+    // Filtre par code produit : ne garde que les ventes contenant l'article recherché
+    const code = productCode.trim().toLowerCase();
+    const matchProduct =
+      !code ||
+      (s.items || []).some(item =>
+        (matchedProductIds && matchedProductIds.has(item.productId)) ||
+        item.productId?.toLowerCase() === code ||
+        item.name?.toLowerCase().includes(code)
+      );
+    return matchSearch && matchFilter && matchProduct;
   });
 
   // Stats
@@ -327,6 +368,45 @@ export default function Sales({ userProfile }: SalesProps) {
           </div>
           <p className="text-2xl font-black text-slate-900 font-mono">{totalDebt.toFixed(3)}<span className="text-sm font-bold text-slate-400 ml-1">DT</span></p>
           <p className="text-[10px] text-rose-400 font-bold mt-1">{sales.filter(s => s.debt > 0).length} vente{sales.filter(s => s.debt > 0).length > 1 ? 's' : ''} en attente</p>
+        </div>
+      </div>
+
+      {/* Recherche par code produit — affiche l'historique des ventes d'un article */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-xs premium-shadow p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+          <div className="w-full sm:max-w-md">
+            <label className="text-[10px] font-black uppercase tracking-[0.18em] text-indigo-500 mb-1.5 flex items-center gap-1.5">
+              <Package className="w-3.5 h-3.5" />
+              Historique par code produit
+            </label>
+            <div className="relative">
+              <Package className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                type="text"
+                name="product-code-search"
+                placeholder="Code-barres, ID ou nom du produit…"
+                value={productCode}
+                onChange={(e) => setProductCode(e.target.value)}
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+                className="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-100 rounded-xl text-xs font-semibold text-slate-700 placeholder-slate-400 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 outline-none transition-all"
+              />
+              {productCode && (
+                <button
+                  onClick={() => setProductCode('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          </div>
+          {productCode.trim() && (
+            <div className="text-xs font-bold text-slate-500 shrink-0 bg-indigo-50 text-indigo-600 px-3 py-2 rounded-xl">
+              {filteredSales.length} vente{filteredSales.length > 1 ? 's' : ''} trouvée{filteredSales.length > 1 ? 's' : ''}
+            </div>
+          )}
         </div>
       </div>
 
